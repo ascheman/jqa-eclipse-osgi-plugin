@@ -1,0 +1,201 @@
+The Eclipse OSGi plugin enriches the graph created by the Java plugin's manifest scanner with OSGi and Eclipse-specific concepts.
+It does not scan new artifact types.
+Instead, it reads existing `ManifestEntry` nodes and creates typed nodes, labels, and relationships.
+
+The plugin implements concepts from the https://docs.osgi.org/specification/osgi.core/8.0.0/[OSGi Core Specification] and the https://projects.eclipse.org/projects/eclipse[Eclipse RCP] platform.
+
+== OSGi Bundle Concepts
+
+[[osgi:Default]]
+=== Group: osgi:Default
+
+Core OSGi bundle concepts: identifies bundles, extracts metadata, resolves fragments and Require-Bundle dependencies.
+
+These concepts are based on the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html[Module Layer] of the OSGi Core Specification.
+
+[[:Osgi:Bundle]]
+==== Nodes labeled with `:Osgi:Bundle`
+
+An existing `:Jar:Archive` node enriched with OSGi bundle metadata from the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.bsn[`Bundle-SymbolicName`] manifest header.
+
+.Properties of `:Osgi:Bundle`
+[options="header"]
+|====
+| Name                        | Description
+| bundleSymbolicName          | The https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.bsn[bundle symbolic name] (without directives)
+| bundleVersion               | The bundle version from https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.versions[`Bundle-Version`]
+| bundleName                  | The human-readable name from `Bundle-Name`
+| bundleVendor                | The vendor from `Bundle-Vendor`
+| singleton                   | `true` if the bundle is declared as https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.bsn[singleton]
+| bundleActivator             | Fully qualified class name of the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.lifecycle.html#framework.lifecycle.activator[bundle activator]
+| activationPolicy            | The https://docs.osgi.org/specification/osgi.core/8.0.0/framework.lifecycle.html#framework.lifecycle.lazyactivation[activation policy] (e.g., `lazy`)
+| requiredExecutionEnvironment | The required execution environment from `Bundle-RequiredExecutionEnvironment` (deprecated in OSGi R4.3+)
+| bundleClassPath             | List of https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.bundleclasspath[Bundle-ClassPath] entries
+|====
+
+[[:Osgi:Fragment]]
+==== Nodes labeled with `:Osgi:Fragment`
+
+A subset of `:Osgi:Bundle` nodes that declare a https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.fragmenthost[`Fragment-Host`] manifest header.
+
+.Additional properties of `:Osgi:Fragment`
+[options="header"]
+|====
+| Name                      | Description
+| fragmentHostSymbolicName  | The symbolic name of the host bundle
+|====
+
+.Relations of `:Osgi:Fragment`
+[options="header"]
+|====
+| Name         | Target label(s)   | Cardinality | Description
+| FRAGMENT_OF  | <<:Osgi:Bundle>>  | 0..1        | References the host bundle (when present in the graph)
+|====
+
+[[:Osgi:RequiredBundle]]
+==== Nodes labeled with `:Osgi:RequiredBundle`
+
+An intermediate node representing a single entry from the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.requirebundle[`Require-Bundle`] manifest header.
+
+.Properties of `:Osgi:RequiredBundle`
+[options="header"]
+|====
+| Name           | Description
+| symbolicName   | The symbolic name of the required bundle
+| versionRange   | The https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.versionrange[bundle-version range] (e.g., `[3.7.0,4.0.0)`)
+| rawValue       | The raw header entry including all directives
+|====
+
+.Relations of `:Osgi:RequiredBundle`
+[options="header"]
+|====
+| Name         | Target label(s)   | Cardinality | Description
+| RESOLVES_TO  | <<:Osgi:Bundle>>  | 0..1        | References the actual bundle (when present in the graph)
+|====
+
+.Relations from `:Osgi:Bundle` to `:Osgi:RequiredBundle`
+[options="header"]
+|====
+| Name            | Target label(s)          | Cardinality | Description
+| REQUIRES_BUNDLE | <<:Osgi:RequiredBundle>> | 0..n        | Declares a dependency on another bundle
+|====
+
+== OSGi Package Concepts
+
+[[osgi:Packages]]
+=== Group: osgi:Packages
+
+Package-level concepts based on the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.exportpackage[Export-Package] and https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.importpackage[Import-Package] headers.
+Creates package wiring that simulates the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.wiring.html[OSGi Wiring Layer].
+
+[[:Osgi:ExportedPackage]]
+==== Nodes labeled with `:Osgi:ExportedPackage`
+
+Represents a single package exported by a bundle via the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.exportpackage[`Export-Package`] manifest header.
+
+.Properties of `:Osgi:ExportedPackage`
+[options="header"]
+|====
+| Name                | Description
+| fqn                 | Fully qualified package name (e.g., `org.example.api`)
+| bundleSymbolicName  | The symbolic name of the exporting bundle
+| version             | The exported https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.versions[version] (e.g., `1.0.0` or `[1.0.0,2.0.0)`)
+| rawValue            | The raw header entry including all directives
+|====
+
+.Relations from `:Osgi:Bundle` to `:Osgi:ExportedPackage`
+[options="header"]
+|====
+| Name             | Target label(s)            | Cardinality | Description
+| EXPORTS_PACKAGE  | <<:Osgi:ExportedPackage>>  | 0..n        | Declares an exported package
+|====
+
+.Relations from `:Osgi:ExportedPackage` to `:Osgi:ImportedPackage`
+[options="header"]
+|====
+| Name       | Target label(s)            | Cardinality | Description
+| SATISFIES  | <<:Osgi:ImportedPackage>>  | 0..n        | Wires an export to matching imports (by fully qualified name)
+|====
+
+[[:Osgi:ImportedPackage]]
+==== Nodes labeled with `:Osgi:ImportedPackage`
+
+Represents a single package imported by a bundle via the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.importpackage[`Import-Package`] manifest header.
+
+.Properties of `:Osgi:ImportedPackage`
+[options="header"]
+|====
+| Name                | Description
+| fqn                 | Fully qualified package name (e.g., `org.example.api`)
+| bundleSymbolicName  | The symbolic name of the importing bundle
+| version             | The requested https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.versionrange[version or version range]
+| optional            | `true` if https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.importpackage[`resolution:=optional`] is declared
+| rawValue            | The raw header entry including all directives
+|====
+
+.Relations from `:Osgi:Bundle` to `:Osgi:ImportedPackage`
+[options="header"]
+|====
+| Name             | Target label(s)            | Cardinality | Description
+| IMPORTS_PACKAGE  | <<:Osgi:ImportedPackage>>  | 0..n        | Declares an imported package
+|====
+
+== Eclipse Concepts
+
+[[eclipse:Default]]
+=== Group: eclipse:Default
+
+Eclipse RCP-specific concepts based on the https://help.eclipse.org/latest/topic/org.eclipse.platform.doc.isv/reference/misc/bundle_manifest.html[Eclipse Bundle Manifest Headers].
+
+[[:Eclipse:FrameworkBundle]]
+==== Nodes labeled with `:Eclipse:FrameworkBundle`
+
+Bundles with a symbolic name starting with `org.eclipse.` are labeled as framework bundles.
+
+[[:Eclipse:ApplicationBundle]]
+==== Nodes labeled with `:Eclipse:ApplicationBundle`
+
+Bundles that are not framework bundles are labeled as application bundles.
+
+[[:Eclipse:PlatformSpecific]]
+==== Nodes labeled with `:Eclipse:PlatformSpecific`
+
+Bundles that declare an https://help.eclipse.org/latest/topic/org.eclipse.platform.doc.isv/reference/misc/bundle_manifest.html[`Eclipse-PlatformFilter`] manifest header.
+
+.Additional properties
+[options="header"]
+|====
+| Name            | Description
+| platformFilter  | The raw Eclipse-PlatformFilter value
+| targetOs        | The target operating system (extracted from the filter)
+| targetArch      | The target architecture (extracted from the filter)
+|====
+
+.Additional properties from `Bundle-Localization`
+[options="header"]
+|====
+| Name                | Description
+| bundleLocalization  | The localization base name from https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.localization[`Bundle-Localization`]
+|====
+
+== OSGi Constraints
+
+[[osgi:Constraints]]
+=== Group: osgi:Constraints
+
+Validation constraints for OSGi best practices based on the https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html[Module Layer] and https://docs.osgi.org/specification/osgi.core/8.0.0/framework.wiring.html[Wiring Layer] specifications.
+
+osgi:UnresolvedRequiredBundle::
+https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.requirebundle[Require-Bundle] entries that cannot be resolved to any bundle in the scanned project.
+
+osgi:UnresolvedFragmentHost::
+https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.fragmenthost[Fragment-Host] references that cannot be resolved to any bundle in the scanned project.
+
+osgi:CircularBundleDependency::
+Circular dependencies between bundles via Require-Bundle (A requires B requires A).
+
+osgi:MissingBundleVersion::
+Bundles that do not declare a https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.versions[`Bundle-Version`] manifest header.
+
+osgi:UnsatisfiedImport::
+Non-optional https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.importpackage[Import-Package] entries that are not satisfied by any Export-Package in the scanned project.

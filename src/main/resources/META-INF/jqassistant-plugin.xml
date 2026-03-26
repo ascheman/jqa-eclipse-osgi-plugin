@@ -4,6 +4,9 @@
                     id="jqa.plugin.eclipse-osgi"
                     version="${project.version}">
     <description>Provides concepts and constraints for analyzing Eclipse RCP/OSGi projects.</description>
+    <ruleInterpreter>
+        <class>net.aschemann.jqassistant.plugins.eclipse.osgi.impl.OsgiRuleInterpreterPlugin</class>
+    </ruleInterpreter>
     <rules>
         <resource>osgi-bundle.xml</resource>
         <resource>osgi-packages.xml</resource>

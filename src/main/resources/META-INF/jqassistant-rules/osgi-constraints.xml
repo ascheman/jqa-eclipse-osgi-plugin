@@ -1,8 +1,9 @@
-<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
 
     <group id="osgi:Constraints">
+        <description>OSGi validation constraints: detects unresolved Require-Bundle and Fragment-Host references, circular bundle dependencies, missing Bundle-Version headers, and unsatisfied Import-Package entries.</description>
         <includeConstraint refId="osgi:UnresolvedRequiredBundle"/>
         <includeConstraint refId="osgi:UnresolvedFragmentHost"/>
         <includeConstraint refId="osgi:CircularBundleDependency"/>
@@ -17,8 +18,8 @@
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
             WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
-            RETURN bundle.bundleSymbolicName AS Bundle, rb.symbolicName AS UnresolvedRequiredBundle
-            ORDER BY bundle.bundleSymbolicName
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, rb.symbolicName AS UnresolvedRequiredBundle
+            ORDER BY Bundle
         ]]></cypher>
     </constraint>
 
@@ -29,8 +30,8 @@
         <cypher><![CDATA[
             MATCH (fragment:Osgi:Fragment)
             WHERE NOT (fragment)-[:FRAGMENT_OF]->(:Osgi:Bundle)
-            RETURN fragment.bundleSymbolicName AS Fragment, fragment.fragmentHostSymbolicName AS UnresolvedHost
-            ORDER BY fragment.bundleSymbolicName
+            RETURN DISTINCT fragment.bundleSymbolicName AS Fragment, fragment.bundleVersion AS FragmentVersion, fragment.fragmentHostSymbolicName AS UnresolvedHost
+            ORDER BY Fragment
         ]]></cypher>
     </constraint>
 
@@ -42,8 +43,8 @@
             MATCH (a:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(b:Osgi:Bundle),
                   (b)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(a)
             WHERE id(a) < id(b)
-            RETURN a.bundleSymbolicName AS BundleA, b.bundleSymbolicName AS BundleB
-            ORDER BY a.bundleSymbolicName
+            RETURN DISTINCT a.bundleSymbolicName AS BundleA, a.bundleVersion AS VersionA, b.bundleSymbolicName AS BundleB, b.bundleVersion AS VersionB
+            ORDER BY BundleA
         ]]></cypher>
     </constraint>
 
@@ -67,8 +68,8 @@
             MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
             WHERE NOT (ip)<-[:SATISFIES]-(:Osgi:ExportedPackage)
               AND ip.optional = false
-            RETURN bundle.bundleSymbolicName AS Bundle, ip.fqn AS UnsatisfiedImport
-            ORDER BY bundle.bundleSymbolicName, ip.fqn
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, ip.fqn AS UnsatisfiedPackageImport, ip.version AS ImportVersion
+            ORDER BY Bundle, UnsatisfiedPackageImport
         ]]></cypher>
     </constraint>
 

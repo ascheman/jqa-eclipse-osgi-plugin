@@ -1,8 +1,9 @@
-<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
 
     <group id="osgi:Default">
+        <description>Core OSGi bundle concepts: identifies bundles, extracts metadata (version, name, vendor, activator, activation policy, execution environment), resolves fragments and Require-Bundle dependencies.</description>
         <includeConcept refId="osgi:Bundle"/>
         <includeConcept refId="osgi:BundleVersion"/>
         <includeConcept refId="osgi:BundleName"/>
@@ -159,34 +160,11 @@
         ]]></cypher>
     </concept>
 
-    <!-- Parse Require-Bundle headers into relationships -->
+    <!-- Parse Require-Bundle headers into relationships (Java-based for proper quote-aware parsing) -->
     <concept id="osgi:RequiresBundle">
         <requiresConcept refId="osgi:Bundle"/>
         <description>Parses the Require-Bundle manifest header and creates REQUIRES_BUNDLE relationships between bundles (as intermediate nodes with symbolicName and versionRange).</description>
-        <cypher><![CDATA[
-            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
-                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
-                  -[:HAS]->(entry:ManifestEntry {name: "Require-Bundle"})
-            WITH bundle, split(entry.value, ",") AS requiredBundles
-            UNWIND requiredBundles AS requiredBundle
-            WITH bundle, trim(requiredBundle) AS req
-            // Filter out empty entries and version-range fragments (e.g. '2.0.0)") from split inside quotes
-            WHERE req <> "" AND req =~ '^[a-zA-Z].*'
-            WITH bundle, CASE
-                WHEN req CONTAINS ";" THEN trim(split(req, ";")[0])
-                ELSE trim(req)
-            END AS requiredSymbolicName,
-            CASE
-                WHEN req CONTAINS "bundle-version=" THEN
-                    trim(replace(replace(split(split(req, "bundle-version=")[1], ";")[0], '"', ''), "'", ''))
-                ELSE null
-            END AS versionRange,
-            req AS rawValue
-            MERGE (rb:Osgi:RequiredBundle {symbolicName: requiredSymbolicName})
-            MERGE (bundle)-[:REQUIRES_BUNDLE]->(rb)
-            SET rb.rawValue = rawValue, rb.versionRange = versionRange
-            RETURN bundle.bundleSymbolicName AS Bundle, requiredSymbolicName AS RequiredBundle, versionRange AS VersionRange
-        ]]></cypher>
+        <source language="osgi"><![CDATA[parseRequireBundle]]></source>
     </concept>
 
     <!-- Resolve Require-Bundle to actual bundles -->

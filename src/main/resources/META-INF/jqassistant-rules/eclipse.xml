@@ -1,8 +1,9 @@
-<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
 
     <group id="eclipse:Default">
+        <description>Eclipse RCP-specific concepts: classifies bundles as framework or application bundles, extracts platform filter (OS/architecture) and localization properties.</description>
         <includeConcept refId="eclipse:PlatformFilter"/>
         <includeConcept refId="eclipse:BundleLocalization"/>
         <includeConcept refId="eclipse:EclipseBundle"/>

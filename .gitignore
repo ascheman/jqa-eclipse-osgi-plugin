@@ -1,5 +1,7 @@
 # Maven
 target/
+settings.xml
+pom.xml.versionsBackup
 
 # IDE
 .idea/

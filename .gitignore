@@ -10,7 +10,8 @@ pom.xml.versionsBackup
 .classpath
 .settings/
 
-# Local notes
+# Claude Code
+.claude/
 CLAUDE.local.md
 
 # OS

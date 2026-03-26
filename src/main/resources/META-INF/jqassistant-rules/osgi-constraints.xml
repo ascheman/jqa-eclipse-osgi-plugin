@@ -1,0 +1,75 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <group id="osgi:Constraints">
+        <includeConstraint refId="osgi:UnresolvedRequiredBundle"/>
+        <includeConstraint refId="osgi:UnresolvedFragmentHost"/>
+        <includeConstraint refId="osgi:CircularBundleDependency"/>
+        <includeConstraint refId="osgi:MissingBundleVersion"/>
+        <includeConstraint refId="osgi:UnsatisfiedImport"/>
+    </group>
+
+    <!-- Detect unresolved Require-Bundle references -->
+    <constraint id="osgi:UnresolvedRequiredBundle">
+        <requiresConcept refId="osgi:RequiredBundleResolution"/>
+        <description>Finds Require-Bundle entries that cannot be resolved to any bundle in the scanned project. These may indicate missing dependencies.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
+            WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
+            RETURN bundle.bundleSymbolicName AS Bundle, rb.symbolicName AS UnresolvedRequiredBundle
+            ORDER BY bundle.bundleSymbolicName
+        ]]></cypher>
+    </constraint>
+
+    <!-- Detect fragments referencing non-existent host bundles -->
+    <constraint id="osgi:UnresolvedFragmentHost">
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>Finds fragment bundles whose Fragment-Host cannot be resolved to any bundle in the scanned project.</description>
+        <cypher><![CDATA[
+            MATCH (fragment:Osgi:Fragment)
+            WHERE NOT (fragment)-[:FRAGMENT_OF]->(:Osgi:Bundle)
+            RETURN fragment.bundleSymbolicName AS Fragment, fragment.fragmentHostSymbolicName AS UnresolvedHost
+            ORDER BY fragment.bundleSymbolicName
+        ]]></cypher>
+    </constraint>
+
+    <!-- Detect circular bundle dependencies -->
+    <constraint id="osgi:CircularBundleDependency">
+        <requiresConcept refId="osgi:RequiredBundleResolution"/>
+        <description>Detects circular dependencies between bundles via Require-Bundle (A requires B requires A).</description>
+        <cypher><![CDATA[
+            MATCH (a:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(b:Osgi:Bundle),
+                  (b)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(a)
+            WHERE id(a) < id(b)
+            RETURN a.bundleSymbolicName AS BundleA, b.bundleSymbolicName AS BundleB
+            ORDER BY a.bundleSymbolicName
+        ]]></cypher>
+    </constraint>
+
+    <!-- Bundles missing a Bundle-Version -->
+    <constraint id="osgi:MissingBundleVersion">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Finds OSGi bundles that do not declare a Bundle-Version in their manifest. Every bundle should have an explicit version.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)
+            WHERE bundle.bundleVersion IS NULL
+            RETURN bundle.bundleSymbolicName AS BundleWithoutVersion
+            ORDER BY bundle.bundleSymbolicName
+        ]]></cypher>
+    </constraint>
+
+    <!-- Imported packages not satisfied by any export -->
+    <constraint id="osgi:UnsatisfiedImport">
+        <requiresConcept refId="osgi:PackageWiring"/>
+        <description>Finds Import-Package entries that are not satisfied by any Export-Package in the scanned project. Optional imports are excluded.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
+            WHERE NOT (ip)<-[:SATISFIES]-(:Osgi:ExportedPackage)
+              AND ip.optional = false
+            RETURN bundle.bundleSymbolicName AS Bundle, ip.fqn AS UnsatisfiedImport
+            ORDER BY bundle.bundleSymbolicName, ip.fqn
+        ]]></cypher>
+    </constraint>
+
+</jqassistant-rules>

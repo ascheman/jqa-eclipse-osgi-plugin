@@ -1,0 +1,45 @@
+= jQAssistant Eclipse OSGi Plugin
+:toc:
+:icons: font
+
+A https://jqassistant.org/[jQAssistant] plugin that provides Cypher-based *concepts* and *constraints* for analyzing Eclipse RCP/OSGi projects.
+
+== Overview
+
+This plugin enriches the graph that jQAssistant's built-in Java plugin creates from JAR/MANIFEST.MF scanning.
+It does _not_ scan new artifact types -- instead it reads existing `ManifestEntry` nodes and creates OSGi/Eclipse-typed nodes, labels, and relationships on top.
+
+=== How it works
+
+. jQAssistant's Java plugin scans JARs and creates nodes for manifests, sections, and entries.
+. This plugin's Cypher concepts read those `ManifestEntry` nodes and create OSGi/Eclipse-typed nodes, labels, and relationships.
+. Constraints validate OSGi best practices against the enriched graph.
+
+== Building
+
+This project uses the Maven Wrapper.
+
+[source,bash]
+----
+# Build and install locally
+./mvnw install -DskipTests
+
+# Build with tests
+./mvnw verify
+----
+
+== Rule Groups
+
+osgi:Default:: Core OSGi bundle concepts (Bundle-SymbolicName, Bundle-Version, Fragment-Host, Require-Bundle, etc.)
+osgi:Packages:: Import/Export package concepts and package wiring
+eclipse:Default:: Eclipse-specific concepts (PlatformFilter, FrameworkBundle, ApplicationBundle)
+osgi:Constraints:: Validation constraints (unresolved bundles, circular dependencies, missing versions, unsatisfied imports)
+
+== Requirements
+
+* Java 11+
+* jQAssistant 2.9.1+
+
+== License
+
+This project is licensed under the https://www.gnu.org/licenses/gpl-3.0.html[GNU General Public License v3].

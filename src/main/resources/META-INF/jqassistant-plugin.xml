@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jqassistant-plugin xmlns="http://schema.jqassistant.org/plugin/v2.4"
+                    name="jQAssistant Eclipse OSGi Plugin"
+                    id="jqa.plugin.eclipse-osgi"
+                    version="${project.version}">
+    <description>Provides concepts and constraints for analyzing Eclipse RCP/OSGi projects.</description>
+    <rules>
+        <resource>osgi-bundle.xml</resource>
+        <resource>osgi-packages.xml</resource>
+        <resource>eclipse.xml</resource>
+        <resource>osgi-constraints.xml</resource>
+    </rules>
+</jqassistant-plugin>

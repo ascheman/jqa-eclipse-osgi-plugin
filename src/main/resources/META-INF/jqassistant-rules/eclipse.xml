@@ -1,0 +1,76 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <group id="eclipse:Default">
+        <includeConcept refId="eclipse:PlatformFilter"/>
+        <includeConcept refId="eclipse:BundleLocalization"/>
+        <includeConcept refId="eclipse:EclipseBundle"/>
+        <includeConcept refId="eclipse:ApplicationBundle"/>
+    </group>
+
+    <!-- Extract Eclipse-PlatformFilter -->
+    <concept id="eclipse:PlatformFilter">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Extracts the Eclipse-PlatformFilter manifest header and sets platformFilter, targetOs, and targetArch properties on the bundle. Labels such bundles as :Eclipse:PlatformSpecific.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Eclipse-PlatformFilter"})
+            WITH bundle, trim(entry.value) AS filter
+            SET bundle:Eclipse:PlatformSpecific,
+                bundle.platformFilter = filter
+            WITH bundle, filter
+            // Extract osgi.os value
+            WITH bundle, filter,
+                 CASE WHEN filter CONTAINS "osgi.os="
+                      THEN split(split(filter, "osgi.os=")[1], ")")[0]
+                      ELSE null
+                 END AS os,
+                 CASE WHEN filter CONTAINS "osgi.arch="
+                      THEN split(split(filter, "osgi.arch=")[1], ")")[0]
+                      ELSE null
+                 END AS arch
+            SET bundle.targetOs = os, bundle.targetArch = arch
+            RETURN bundle.bundleSymbolicName AS Bundle, filter AS PlatformFilter, os AS OS, arch AS Arch
+        ]]></cypher>
+    </concept>
+
+    <!-- Extract Bundle-Localization (Eclipse i18n) -->
+    <concept id="eclipse:BundleLocalization">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Extracts the Bundle-Localization manifest header (typically "plugin") used for Eclipse i18n.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-Localization"})
+            SET bundle.bundleLocalization = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS Bundle, bundle.bundleLocalization AS Localization
+        ]]></cypher>
+    </concept>
+
+    <!-- Identify Eclipse framework bundles (org.eclipse.*) -->
+    <concept id="eclipse:EclipseBundle">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Labels bundles with symbolic names starting with "org.eclipse." as :Eclipse:FrameworkBundle to distinguish Eclipse platform bundles from application bundles.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)
+            WHERE bundle.bundleSymbolicName STARTS WITH "org.eclipse."
+            SET bundle:Eclipse:FrameworkBundle
+            RETURN bundle.bundleSymbolicName AS EclipseBundle
+        ]]></cypher>
+    </concept>
+
+    <!-- Identify application bundles (non-Eclipse, non-framework) -->
+    <concept id="eclipse:ApplicationBundle">
+        <requiresConcept refId="eclipse:EclipseBundle"/>
+        <description>Labels OSGi bundles that are NOT Eclipse framework bundles as :Eclipse:ApplicationBundle, helping to distinguish custom application code from platform dependencies.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)
+            WHERE NOT bundle:Eclipse:FrameworkBundle
+            SET bundle:Eclipse:ApplicationBundle
+            RETURN bundle.bundleSymbolicName AS ApplicationBundle
+        ]]></cypher>
+    </concept>
+
+</jqassistant-rules>

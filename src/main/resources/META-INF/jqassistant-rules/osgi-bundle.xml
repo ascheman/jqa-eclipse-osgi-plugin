@@ -1,0 +1,205 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <group id="osgi:Default">
+        <includeConcept refId="osgi:Bundle"/>
+        <includeConcept refId="osgi:BundleVersion"/>
+        <includeConcept refId="osgi:BundleName"/>
+        <includeConcept refId="osgi:BundleVendor"/>
+        <includeConcept refId="osgi:SingletonBundle"/>
+        <includeConcept refId="osgi:BundleActivator"/>
+        <includeConcept refId="osgi:LazyActivation"/>
+        <includeConcept refId="osgi:ExecutionEnvironment"/>
+        <includeConcept refId="osgi:Fragment"/>
+        <includeConcept refId="osgi:FragmentResolvesToHost"/>
+        <includeConcept refId="osgi:RequiresBundle"/>
+        <includeConcept refId="osgi:RequiredBundleResolution"/>
+    </group>
+
+    <!-- Mark JARs with Bundle-SymbolicName as OSGi Bundles -->
+    <concept id="osgi:Bundle">
+        <description>Labels JAR archives containing a Bundle-SymbolicName manifest header as :Osgi:Bundle and sets the bundleSymbolicName property.</description>
+        <cypher><![CDATA[
+            MATCH (jar:Jar:Archive)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry)
+            WHERE entry.name = "Bundle-SymbolicName"
+            WITH jar, CASE
+                WHEN entry.value CONTAINS ";" THEN trim(split(entry.value, ";")[0])
+                ELSE trim(entry.value)
+            END AS symbolicName
+            SET jar:Osgi:Bundle, jar.bundleSymbolicName = symbolicName
+            RETURN jar.bundleSymbolicName AS BundleSymbolicName
+        ]]></cypher>
+    </concept>
+
+    <!-- Extract Bundle-Version -->
+    <concept id="osgi:BundleVersion">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the bundleVersion property on OSGi bundles from the Bundle-Version manifest header.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-Version"})
+            SET bundle.bundleVersion = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.bundleVersion AS Version
+        ]]></cypher>
+    </concept>
+
+    <!-- Extract Bundle-Name -->
+    <concept id="osgi:BundleName">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the bundleName property on OSGi bundles from the Bundle-Name manifest header.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-Name"})
+            SET bundle.bundleName = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.bundleName AS Name
+        ]]></cypher>
+    </concept>
+
+    <!-- Extract Bundle-Vendor -->
+    <concept id="osgi:BundleVendor">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the bundleVendor property on OSGi bundles from the Bundle-Vendor manifest header.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-Vendor"})
+            SET bundle.bundleVendor = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.bundleVendor AS Vendor
+        ]]></cypher>
+    </concept>
+
+    <!-- Detect singleton bundles -->
+    <concept id="osgi:SingletonBundle">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the singleton property to true on OSGi bundles declared as singleton in the Bundle-SymbolicName header.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-SymbolicName"})
+            WHERE toLower(entry.value) CONTAINS "singleton:=true"
+            SET bundle.singleton = true
+            RETURN bundle.bundleSymbolicName AS SingletonBundle
+        ]]></cypher>
+    </concept>
+
+    <!-- Extract Bundle-Activator class reference -->
+    <concept id="osgi:BundleActivator">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the bundleActivator property and creates a relationship from the bundle to its activator class.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-Activator"})
+            SET bundle.bundleActivator = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.bundleActivator AS Activator
+        ]]></cypher>
+    </concept>
+
+    <!-- Detect lazy activation policy -->
+    <concept id="osgi:LazyActivation">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the activationPolicy property on bundles with Bundle-ActivationPolicy: lazy.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-ActivationPolicy"})
+            SET bundle.activationPolicy = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.activationPolicy AS ActivationPolicy
+        ]]></cypher>
+    </concept>
+
+    <!-- Extract Bundle-RequiredExecutionEnvironment -->
+    <concept id="osgi:ExecutionEnvironment">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the requiredExecutionEnvironment property from the Bundle-RequiredExecutionEnvironment manifest header.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-RequiredExecutionEnvironment"})
+            SET bundle.requiredExecutionEnvironment = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.requiredExecutionEnvironment AS ExecutionEnvironment
+        ]]></cypher>
+    </concept>
+
+    <!-- Identify fragment bundles -->
+    <concept id="osgi:Fragment">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Labels bundles with a Fragment-Host header as :Osgi:Fragment and extracts the host bundle symbolic name.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Fragment-Host"})
+            WITH bundle, CASE
+                WHEN entry.value CONTAINS ";" THEN trim(split(entry.value, ";")[0])
+                ELSE trim(entry.value)
+            END AS hostSymbolicName,
+            entry.value AS rawValue
+            SET bundle:Osgi:Fragment,
+                bundle.fragmentHostSymbolicName = hostSymbolicName,
+                bundle.fragmentHostRaw = rawValue
+            RETURN bundle.bundleSymbolicName AS Fragment, hostSymbolicName AS FragmentHost
+        ]]></cypher>
+    </concept>
+
+    <!-- Resolve fragment-to-host relationships -->
+    <concept id="osgi:FragmentResolvesToHost">
+        <requiresConcept refId="osgi:Fragment"/>
+        <description>Creates FRAGMENT_OF relationships from fragment bundles to their host bundles (when the host exists in the graph).</description>
+        <cypher><![CDATA[
+            MATCH (fragment:Osgi:Fragment), (host:Osgi:Bundle)
+            WHERE fragment.fragmentHostSymbolicName = host.bundleSymbolicName
+              AND NOT (fragment)-[:FRAGMENT_OF]->(host)
+            CREATE (fragment)-[:FRAGMENT_OF]->(host)
+            RETURN fragment.bundleSymbolicName AS Fragment, host.bundleSymbolicName AS Host
+        ]]></cypher>
+    </concept>
+
+    <!-- Parse Require-Bundle headers into relationships -->
+    <concept id="osgi:RequiresBundle">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Parses the Require-Bundle manifest header and creates REQUIRES_BUNDLE relationships between bundles (as intermediate nodes with symbolicName and versionRange).</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Require-Bundle"})
+            WITH bundle, split(entry.value, ",") AS requiredBundles
+            UNWIND requiredBundles AS requiredBundle
+            WITH bundle, trim(requiredBundle) AS req
+            // Filter out empty entries and version-range fragments (e.g. '2.0.0)") from split inside quotes
+            WHERE req <> "" AND req =~ '^[a-zA-Z].*'
+            WITH bundle, CASE
+                WHEN req CONTAINS ";" THEN trim(split(req, ";")[0])
+                ELSE trim(req)
+            END AS requiredSymbolicName,
+            CASE
+                WHEN req CONTAINS "bundle-version=" THEN
+                    trim(replace(replace(split(split(req, "bundle-version=")[1], ";")[0], '"', ''), "'", ''))
+                ELSE null
+            END AS versionRange,
+            req AS rawValue
+            MERGE (rb:Osgi:RequiredBundle {symbolicName: requiredSymbolicName})
+            MERGE (bundle)-[:REQUIRES_BUNDLE]->(rb)
+            SET rb.rawValue = rawValue, rb.versionRange = versionRange
+            RETURN bundle.bundleSymbolicName AS Bundle, requiredSymbolicName AS RequiredBundle, versionRange AS VersionRange
+        ]]></cypher>
+    </concept>
+
+    <!-- Resolve Require-Bundle to actual bundles -->
+    <concept id="osgi:RequiredBundleResolution">
+        <requiresConcept refId="osgi:RequiresBundle"/>
+        <description>Creates RESOLVES_TO relationships from RequiredBundle nodes to the actual Bundle they refer to (when present in the graph).</description>
+        <cypher><![CDATA[
+            MATCH (rb:Osgi:RequiredBundle), (target:Osgi:Bundle)
+            WHERE rb.symbolicName = target.bundleSymbolicName
+              AND NOT (rb)-[:RESOLVES_TO]->(target)
+            CREATE (rb)-[:RESOLVES_TO]->(target)
+            RETURN rb.symbolicName AS RequiredBundle, target.bundleSymbolicName AS ResolvedTo
+        ]]></cypher>
+    </concept>
+
+</jqassistant-rules>

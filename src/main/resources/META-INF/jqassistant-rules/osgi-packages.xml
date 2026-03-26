@@ -1,0 +1,102 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <group id="osgi:Packages">
+        <includeConcept refId="osgi:ExportedPackage"/>
+        <includeConcept refId="osgi:ImportedPackage"/>
+        <includeConcept refId="osgi:PackageWiring"/>
+        <includeConcept refId="osgi:BundleClassPath"/>
+    </group>
+
+    <!-- Parse Export-Package header -->
+    <concept id="osgi:ExportedPackage">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Parses the Export-Package manifest header and creates :Osgi:ExportedPackage nodes with EXPORTS_PACKAGE relationships from the bundle.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Export-Package"})
+            WITH bundle, split(entry.value, ",") AS exportedPackages
+            UNWIND exportedPackages AS exportedPackage
+            WITH bundle, trim(exportedPackage) AS pkg
+            // Filter out empty entries and version-range fragments from split inside quotes
+            WHERE pkg <> "" AND pkg =~ '^[a-zA-Z].*'
+            WITH bundle, CASE
+                WHEN pkg CONTAINS ";" THEN trim(split(pkg, ";")[0])
+                ELSE trim(pkg)
+            END AS packageName,
+            CASE
+                WHEN pkg CONTAINS "version=" THEN
+                    trim(replace(replace(split(split(pkg, "version=")[1], ";")[0], '"', ''), "'", ''))
+                ELSE null
+            END AS version,
+            pkg AS rawValue
+            MERGE (ep:Osgi:ExportedPackage {fqn: packageName, bundleSymbolicName: bundle.bundleSymbolicName})
+            MERGE (bundle)-[:EXPORTS_PACKAGE]->(ep)
+            SET ep.rawValue = rawValue, ep.version = version
+            RETURN bundle.bundleSymbolicName AS Bundle, packageName AS ExportedPackage, version AS Version
+        ]]></cypher>
+    </concept>
+
+    <!-- Parse Import-Package header -->
+    <concept id="osgi:ImportedPackage">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Parses the Import-Package manifest header and creates :Osgi:ImportedPackage nodes with IMPORTS_PACKAGE relationships from the bundle.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Import-Package"})
+            WITH bundle, split(entry.value, ",") AS importedPackages
+            UNWIND importedPackages AS importedPackage
+            WITH bundle, trim(importedPackage) AS pkg
+            // Filter out empty entries and version-range fragments from split inside quotes
+            WHERE pkg <> "" AND pkg =~ '^[a-zA-Z].*'
+            WITH bundle, CASE
+                WHEN pkg CONTAINS ";" THEN trim(split(pkg, ";")[0])
+                ELSE trim(pkg)
+            END AS packageName,
+            CASE
+                WHEN pkg CONTAINS "version=" THEN
+                    trim(replace(replace(split(split(pkg, "version=")[1], ";")[0], '"', ''), "'", ''))
+                ELSE null
+            END AS version,
+            pkg AS rawValue,
+            CASE WHEN toLower(pkg) CONTAINS "resolution:=optional" THEN true ELSE false END AS optional
+            MERGE (ip:Osgi:ImportedPackage {fqn: packageName, bundleSymbolicName: bundle.bundleSymbolicName})
+            MERGE (bundle)-[:IMPORTS_PACKAGE]->(ip)
+            SET ip.rawValue = rawValue, ip.optional = optional, ip.version = version
+            RETURN bundle.bundleSymbolicName AS Bundle, packageName AS ImportedPackage, optional AS Optional, version AS Version
+        ]]></cypher>
+    </concept>
+
+    <!-- Wire exported packages to imported packages -->
+    <concept id="osgi:PackageWiring">
+        <requiresConcept refId="osgi:ExportedPackage"/>
+        <requiresConcept refId="osgi:ImportedPackage"/>
+        <description>Creates SATISFIES relationships from exported packages to imported packages with matching fully qualified names (simulates OSGi package wiring).</description>
+        <cypher><![CDATA[
+            MATCH (ep:Osgi:ExportedPackage), (ip:Osgi:ImportedPackage)
+            WHERE ep.fqn = ip.fqn
+              AND ep.bundleSymbolicName <> ip.bundleSymbolicName
+              AND NOT (ep)-[:SATISFIES]->(ip)
+            CREATE (ep)-[:SATISFIES]->(ip)
+            RETURN ep.fqn AS Package, ep.bundleSymbolicName AS Exporter, ip.bundleSymbolicName AS Importer
+        ]]></cypher>
+    </concept>
+
+    <!-- Parse Bundle-ClassPath header -->
+    <concept id="osgi:BundleClassPath">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Parses the Bundle-ClassPath manifest header and stores the embedded classpath entries as a property on the bundle.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Bundle-ClassPath"})
+            WITH bundle, [x IN split(entry.value, ",") | trim(x)] AS classPathEntries
+            SET bundle.bundleClassPath = classPathEntries
+            RETURN bundle.bundleSymbolicName AS Bundle, classPathEntries AS ClassPath
+        ]]></cypher>
+    </concept>
+
+</jqassistant-rules>

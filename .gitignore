@@ -1,0 +1,15 @@
+# Maven
+target/
+
+# IDE
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# Local notes
+CLAUDE.local.md
+
+# OS
+.DS_Store

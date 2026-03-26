@@ -52,7 +52,7 @@
 
         <assertj-core.version>3.27.7</assertj-core.version>
         <jqa.version>2.9.1</jqa.version>
-        <junit-jupiter.version>5.12.1</junit-jupiter.version>
+        <junit-jupiter.version>6.0.3</junit-jupiter.version>
         <maven-dependency-plugin.version>3.10.0</maven-dependency-plugin.version>
         <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
         <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>

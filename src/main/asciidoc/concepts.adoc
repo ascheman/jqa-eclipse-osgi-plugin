@@ -200,6 +200,14 @@ Bundles that do not declare a https://docs.osgi.org/specification/osgi.core/8.0.
 osgi:UnsatisfiedImport::
 Non-optional https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.importpackage[Import-Package] entries that are not satisfied by any Export-Package in the scanned project.
 
+osgi:UnusedImportedPackage::
+Import-Package entries where no type in the bundle depends on any type from the imported package.
+These may indicate unnecessary imports that should be removed from the manifest.
+
+osgi:UnusedRequiredBundle (severity: info)::
+Require-Bundle entries where no type in the requiring bundle depends on any type contained in the required bundle.
+Runtime-only dependencies (e.g., OSGi Declarative Services, extension points, reflection-based loading) are expected false positives.
+
 == Reports
 
 [[osgi:Reports]]
@@ -208,6 +216,10 @@ Non-optional https://docs.osgi.org/specification/osgi.core/8.0.0/framework.modul
 osgi:BundleDependencyGraph::
 Returns bundle dependency adjacency pairs with source/target versions and dependency types (`viaRequireBundle`, `viaPackageWiring`).
 This concept requires `osgi:BundleDependency` from the `osgi:Default` group.
+
+osgi:RequireBundleGraph::
+Returns Require-Bundle adjacency pairs with version ranges, optional flag, and resolution status.
+Includes both resolved and unresolved entries.
 
 === PlantUML Bundle Dependency Diagram (optional)
 
@@ -239,6 +251,32 @@ To use it:
 </concept>
 ----
 
-The `scriptname` property points to the Groovy script file on disk (relative to the project root).
+The `scriptname` property points to the Groovy script file on disk, or is loaded from the classpath (e.g., from a plugin JAR) if the file does not exist.
 The optional `filename` property controls the output file name (default: `bundle-dependencies.puml`).
 The diagram is written to the jQAssistant report directory.
+
+==== Require-Bundle PlantUML Diagram
+
+A second Groovy script (`groovy/require-bundle-plantuml.groovy`) generates a PlantUML diagram specifically for Require-Bundle dependencies.
+Mandatory dependencies are shown as *red solid* arrows, optional ones as *blue dashed* arrows.
+Unresolved bundles (not found in the scan) are shown with a gray background.
+
+[source,xml]
+----
+<concept id="my-project:RequireBundlePlantUML">
+    <requiresConcept refId="osgi:RequiresBundle"/>
+    <description>Generates a PlantUML diagram of Require-Bundle dependencies.</description>
+    <cypher><![CDATA[
+        MATCH (source:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
+        OPTIONAL MATCH (rb)-[:RESOLVES_TO]->(target:Osgi:Bundle)
+        RETURN DISTINCT source.bundleSymbolicName AS Bundle,
+               rb.symbolicName AS RequiredBundle,
+               rb.optional AS Optional,
+               target.bundleSymbolicName IS NOT NULL AS Resolved
+        ORDER BY Bundle, RequiredBundle
+    ]]></cypher>
+    <report type="Groovy">
+        <property name="scriptname">groovy/require-bundle-plantuml.groovy</property>
+    </report>
+</concept>
+----

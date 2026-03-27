@@ -9,6 +9,8 @@
         <includeConstraint refId="osgi:CircularBundleDependency"/>
         <includeConstraint refId="osgi:MissingBundleVersion"/>
         <includeConstraint refId="osgi:UnsatisfiedImport"/>
+        <includeConstraint refId="osgi:UnusedImportedPackage"/>
+        <includeConstraint refId="osgi:UnusedRequiredBundle"/>
     </group>
 
     <!-- Detect unresolved Require-Bundle references -->
@@ -70,6 +72,37 @@
               AND ip.optional = false
             RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, ip.fqn AS UnsatisfiedPackageImport, ip.version AS ImportVersion
             ORDER BY Bundle, UnsatisfiedPackageImport
+        ]]></cypher>
+    </constraint>
+
+    <!-- Imported packages not referenced by any type in the bundle -->
+    <constraint id="osgi:UnusedImportedPackage">
+        <requiresConcept refId="osgi:ImportedPackage"/>
+        <description>Finds Import-Package entries where no type in the bundle depends on any type from the imported package. These may indicate unnecessary imports that should be removed from the manifest.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
+            WHERE ip.fqn =~ '^[a-zA-Z].*'
+              AND NOT EXISTS {
+                MATCH (bundle)-[:CONTAINS]->(t:Type)-[:DEPENDS_ON]->(dep:Type)
+                WHERE dep.fqn STARTS WITH ip.fqn + '.'
+              }
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, ip.fqn AS UnusedPackageImport, ip.optional AS Optional
+            ORDER BY Bundle, UnusedPackageImport
+        ]]></cypher>
+    </constraint>
+
+    <!-- Required bundles not referenced by any type in the bundle -->
+    <constraint id="osgi:UnusedRequiredBundle" severity="info">
+        <requiresConcept refId="osgi:RequiredBundleResolution"/>
+        <description>Finds Require-Bundle entries where no type in the requiring bundle depends on any type contained in the required bundle. These may indicate unnecessary bundle dependencies. Note: runtime-only dependencies (e.g., OSGi Declarative Services, extension points, reflection-based loading) are expected false positives.</description>
+        <cypher><![CDATA[
+            MATCH (source:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(target:Osgi:Bundle)
+            WHERE source <> target
+              AND NOT EXISTS {
+                MATCH (source)-[:CONTAINS]->(t:Type)-[:DEPENDS_ON]->(dep:Type)<-[:CONTAINS]-(target)
+              }
+            RETURN DISTINCT source.bundleSymbolicName AS Bundle, source.bundleVersion AS BundleVersion, target.bundleSymbolicName AS UnusedRequiredBundle, target.bundleVersion AS RequiredBundleVersion
+            ORDER BY Bundle, UnusedRequiredBundle
         ]]></cypher>
     </constraint>
 

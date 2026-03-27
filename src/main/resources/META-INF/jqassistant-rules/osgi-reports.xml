@@ -5,6 +5,7 @@
     <group id="osgi:Reports">
         <description>Report concepts for visualizing OSGi bundle dependencies.</description>
         <includeConcept refId="osgi:BundleDependencyGraph"/>
+        <includeConcept refId="osgi:RequireBundleGraph"/>
     </group>
 
     <!-- Adjacency pairs for bundle dependencies -->
@@ -20,6 +21,23 @@
                    d.viaRequireBundle AS ViaRequireBundle,
                    d.viaPackageWiring AS ViaPackageWiring
             ORDER BY Source, Target
+        ]]></cypher>
+    </concept>
+
+    <!-- Adjacency pairs for Require-Bundle dependencies -->
+    <concept id="osgi:RequireBundleGraph">
+        <requiresConcept refId="osgi:RequiresBundle"/>
+        <description>Returns Require-Bundle adjacency pairs (source, required) with version ranges. Includes both resolved and unresolved entries.</description>
+        <cypher><![CDATA[
+            MATCH (source:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
+            OPTIONAL MATCH (rb)-[:RESOLVES_TO]->(target:Osgi:Bundle)
+            RETURN DISTINCT source.bundleSymbolicName AS Bundle,
+                   source.bundleVersion AS BundleVersion,
+                   rb.symbolicName AS RequiredBundle,
+                   rb.versionRange AS VersionRange,
+                   rb.optional AS Optional,
+                   target.bundleSymbolicName IS NOT NULL AS Resolved
+            ORDER BY Bundle, RequiredBundle
         ]]></cypher>
     </concept>
 

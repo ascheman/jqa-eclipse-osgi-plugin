@@ -108,19 +108,22 @@ public class OsgiRuleInterpreterPlugin implements RuleInterpreterPlugin {
                 for (HeaderEntry entry : OsgiManifestHeaderParser.parseHeader(headerValue)) {
                     String symbolicName = entry.getName();
                     String versionRange = entry.getAttribute("bundle-version");
+                    String resolution = entry.getAttribute("resolution");
+                    boolean optional = "optional".equals(resolution);
                     String rawValue = entry.getRawValue();
 
                     Map<String, Object> params = new LinkedHashMap<>();
                     params.put("bundleName", bundleName);
                     params.put("symbolicName", symbolicName);
                     params.put("versionRange", versionRange);
+                    params.put("optional", optional);
                     params.put("rawValue", rawValue);
 
                     store.executeQuery(
                             "MATCH (bundle:Osgi:Bundle {bundleSymbolicName: $bundleName}) "
                                     + "MERGE (rb:Osgi:RequiredBundle {symbolicName: $symbolicName}) "
                                     + "MERGE (bundle)-[:REQUIRES_BUNDLE]->(rb) "
-                                    + "SET rb.rawValue = $rawValue, rb.versionRange = $versionRange",
+                                    + "SET rb.rawValue = $rawValue, rb.versionRange = $versionRange, rb.optional = $optional",
                             params).close();
 
                     rows.add(toRow(rule, context, Map.of(

@@ -199,3 +199,46 @@ Bundles that do not declare a https://docs.osgi.org/specification/osgi.core/8.0.
 
 osgi:UnsatisfiedImport::
 Non-optional https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.importpackage[Import-Package] entries that are not satisfied by any Export-Package in the scanned project.
+
+== Reports
+
+[[osgi:Reports]]
+=== Group: osgi:Reports
+
+osgi:BundleDependencyGraph::
+Returns bundle dependency adjacency pairs with source/target versions and dependency types (`viaRequireBundle`, `viaPackageWiring`).
+This concept requires `osgi:BundleDependency` from the `osgi:Default` group.
+
+=== PlantUML Bundle Dependency Diagram (optional)
+
+This plugin ships a Groovy script (`groovy/bundle-dependency-plantuml.groovy`) that generates a PlantUML component diagram file (`bundle-dependencies.puml`) in the jQAssistant report directory.
+
+NOTE: This feature requires the https://github.com/ascheman/jqa-groovy-plugin[jQAssistant Groovy Plugin] as an additional dependency.
+
+To use it:
+
+. Add the Groovy plugin as an additional dependency to your jQAssistant configuration.
+. Copy the Groovy script from this plugin's JAR (`groovy/bundle-dependency-plantuml.groovy`) to your project, e.g., `jqassistant/groovy/bundle-dependency-plantuml.groovy`.
+. Add a concept to your project's rule file (e.g., `jqassistant/my-rules.xml`):
+
+[source,xml]
+----
+<concept id="my-project:BundleDependencyPlantUML">
+    <requiresConcept refId="osgi:BundleDependency"/>
+    <description>Generates a PlantUML component diagram of bundle dependencies.</description>
+    <cypher><![CDATA[
+        MATCH (s:Osgi:Bundle)-[d:DEPENDS_ON]->(t:Osgi:Bundle)
+        RETURN DISTINCT s.bundleSymbolicName AS Source, t.bundleSymbolicName AS Target
+        ORDER BY Source, Target
+    ]]></cypher>
+    <report type="Groovy">
+        <property name="scriptname">jqassistant/groovy/bundle-dependency-plantuml.groovy</property>
+        <!-- Optional: custom output file name (default: bundle-dependencies.puml) -->
+        <property name="filename">my-dependencies.puml</property>
+    </report>
+</concept>
+----
+
+The `scriptname` property points to the Groovy script file on disk (relative to the project root).
+The optional `filename` property controls the output file name (default: `bundle-dependencies.puml`).
+The diagram is written to the jQAssistant report directory.

@@ -1,0 +1,26 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <group id="osgi:Reports">
+        <description>Report concepts for visualizing OSGi bundle dependencies.</description>
+        <includeConcept refId="osgi:BundleDependencyGraph"/>
+    </group>
+
+    <!-- Adjacency pairs for bundle dependencies -->
+    <concept id="osgi:BundleDependencyGraph">
+        <requiresConcept refId="osgi:BundleDependency"/>
+        <description>Returns bundle dependency adjacency pairs (source, target) with dependency types and versions.</description>
+        <cypher><![CDATA[
+            MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
+            RETURN DISTINCT source.bundleSymbolicName AS Source,
+                   source.bundleVersion AS SourceVersion,
+                   target.bundleSymbolicName AS Target,
+                   target.bundleVersion AS TargetVersion,
+                   d.viaRequireBundle AS ViaRequireBundle,
+                   d.viaPackageWiring AS ViaPackageWiring
+            ORDER BY Source, Target
+        ]]></cypher>
+    </concept>
+
+</jqassistant-rules>

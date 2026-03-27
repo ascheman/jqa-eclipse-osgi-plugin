@@ -16,6 +16,7 @@
         <includeConcept refId="osgi:FragmentResolvesToHost"/>
         <includeConcept refId="osgi:RequiresBundle"/>
         <includeConcept refId="osgi:RequiredBundleResolution"/>
+        <includeConcept refId="osgi:BundleDependency"/>
     </group>
 
     <!-- Mark JARs with Bundle-SymbolicName as OSGi Bundles -->
@@ -165,6 +166,41 @@
         <requiresConcept refId="osgi:Bundle"/>
         <description>Parses the Require-Bundle manifest header and creates REQUIRES_BUNDLE relationships between bundles (as intermediate nodes with symbolicName and versionRange).</description>
         <source language="osgi"><![CDATA[parseRequireBundle]]></source>
+    </concept>
+
+    <!-- Create bundle-level dependency relationships -->
+    <concept id="osgi:BundleDependency">
+        <requiresConcept refId="osgi:RequiredBundleResolution"/>
+        <requiresConcept refId="osgi:PackageWiring"/>
+        <description>Creates DEPENDS_ON relationships between bundles based on Require-Bundle resolution and Import/Export package wiring. Properties viaRequireBundle and viaPackageWiring indicate the dependency source.</description>
+        <cypher><![CDATA[
+            // Collect all dependency pairs by symbolic name
+            OPTIONAL MATCH (s1:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(t1:Osgi:Bundle)
+            WHERE s1.bundleSymbolicName <> t1.bundleSymbolicName
+            WITH collect(DISTINCT [s1.bundleSymbolicName, t1.bundleSymbolicName]) AS rbPairs
+            OPTIONAL MATCH (s2:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(:Osgi:ImportedPackage)<-[:SATISFIES]-(:Osgi:ExportedPackage)<-[:EXPORTS_PACKAGE]-(t2:Osgi:Bundle)
+            WHERE s2.bundleSymbolicName <> t2.bundleSymbolicName
+            WITH rbPairs, collect(DISTINCT [s2.bundleSymbolicName, t2.bundleSymbolicName]) AS pkgPairs
+            // Combine into unique pairs
+            WITH [p IN rbPairs + pkgPairs WHERE p[0] IS NOT NULL | p] AS allPairs
+            UNWIND allPairs AS pair
+            WITH DISTINCT pair[0] AS sourceName, pair[1] AS targetName
+            // Determine dependency types
+            WITH sourceName, targetName,
+              EXISTS { MATCH (s:Osgi:Bundle {bundleSymbolicName: sourceName})-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(t:Osgi:Bundle {bundleSymbolicName: targetName}) } AS viaRequireBundle,
+              EXISTS { MATCH (s:Osgi:Bundle {bundleSymbolicName: sourceName})-[:IMPORTS_PACKAGE]->(:Osgi:ImportedPackage)<-[:SATISFIES]-(:Osgi:ExportedPackage)<-[:EXPORTS_PACKAGE]-(t:Osgi:Bundle {bundleSymbolicName: targetName}) } AS viaPackageWiring
+            // Pick representative nodes and create relationship
+            MATCH (source:Osgi:Bundle {bundleSymbolicName: sourceName})
+            WITH sourceName, targetName, viaRequireBundle, viaPackageWiring, min(id(source)) AS sourceId
+            MATCH (target:Osgi:Bundle {bundleSymbolicName: targetName})
+            WITH sourceId, targetName, viaRequireBundle, viaPackageWiring, min(id(target)) AS targetId
+            MATCH (source:Osgi:Bundle) WHERE id(source) = sourceId
+            MATCH (target:Osgi:Bundle) WHERE id(target) = targetId
+            MERGE (source)-[d:DEPENDS_ON]->(target)
+            SET d.viaRequireBundle = viaRequireBundle, d.viaPackageWiring = viaPackageWiring
+            RETURN source.bundleSymbolicName AS Source, target.bundleSymbolicName AS Target, d.viaRequireBundle AS ViaRequireBundle, d.viaPackageWiring AS ViaPackageWiring
+            ORDER BY Source, Target
+        ]]></cypher>
     </concept>
 
     <!-- Resolve Require-Bundle to actual bundles -->

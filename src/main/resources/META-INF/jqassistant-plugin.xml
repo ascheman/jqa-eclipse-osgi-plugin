@@ -12,5 +12,6 @@
         <resource>osgi-packages.xml</resource>
         <resource>eclipse.xml</resource>
         <resource>osgi-constraints.xml</resource>
+        <resource>osgi-reports.xml</resource>
     </rules>
 </jqassistant-plugin>

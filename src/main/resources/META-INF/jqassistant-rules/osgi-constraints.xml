@@ -11,6 +11,7 @@
         <includeConstraint refId="osgi:UnsatisfiedImport"/>
         <includeConstraint refId="osgi:UnusedImportedPackage"/>
         <includeConstraint refId="osgi:UnusedRequiredBundle"/>
+        <includeConstraint refId="osgi:RedundantPackageImport"/>
     </group>
 
     <!-- Detect unresolved Require-Bundle references -->
@@ -103,6 +104,24 @@
               }
             RETURN DISTINCT source.bundleSymbolicName AS Bundle, source.bundleVersion AS BundleVersion, target.bundleSymbolicName AS UnusedRequiredBundle, target.bundleVersion AS RequiredBundleVersion
             ORDER BY Bundle, UnusedRequiredBundle
+        ]]></cypher>
+    </constraint>
+
+    <!-- Import-Package entries already covered by Require-Bundle -->
+    <constraint id="osgi:RedundantPackageImport" severity="info">
+        <requiresConcept refId="osgi:ImportedPackage"/>
+        <requiresConcept refId="osgi:ExportedPackage"/>
+        <requiresConcept refId="osgi:RequiredBundleResolution"/>
+        <description>Finds Import-Package entries that are already covered by a Require-Bundle dependency (the required bundle exports the imported package). These redundant imports can be removed from the manifest.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
+            WHERE ip.fqn =~ '^[a-zA-Z].*'
+            MATCH (bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(required:Osgi:Bundle)
+                  -[:EXPORTS_PACKAGE]->(ep:Osgi:ExportedPackage)
+            WHERE ep.fqn = ip.fqn
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion,
+                   ip.fqn AS RedundantImport, required.bundleSymbolicName AS CoveredByBundle
+            ORDER BY Bundle, RedundantImport
         ]]></cypher>
     </constraint>
 

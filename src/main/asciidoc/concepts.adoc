@@ -208,6 +208,10 @@ osgi:UnusedRequiredBundle (severity: info)::
 Require-Bundle entries where no type in the requiring bundle depends on any type contained in the required bundle.
 Runtime-only dependencies (e.g., OSGi Declarative Services, extension points, reflection-based loading) are expected false positives.
 
+osgi:RedundantPackageImport (severity: info)::
+Import-Package entries that are already covered by a Require-Bundle dependency (the required bundle exports the imported package).
+These redundant imports can be removed from the manifest.
+
 == Reports
 
 [[osgi:Reports]]
@@ -230,53 +234,49 @@ NOTE: This feature requires the https://github.com/ascheman/jqa-groovy-plugin[jQ
 To use it:
 
 . Add the Groovy plugin as an additional dependency to your jQAssistant configuration.
-. Copy the Groovy script from this plugin's JAR (`groovy/bundle-dependency-plantuml.groovy`) to your project, e.g., `jqassistant/groovy/bundle-dependency-plantuml.groovy`.
-. Add a concept to your project's rule file (e.g., `jqassistant/my-rules.xml`):
+. Add a concept to your project's rule file (e.g., `jqassistant/rules/my-rules.xml`).
+The script is loaded from the classpath (shipped in this plugin's JAR), or from disk if a local copy exists.
 
 [source,xml]
 ----
 <concept id="my-project:BundleDependencyPlantUML">
     <requiresConcept refId="osgi:BundleDependency"/>
-    <description>Generates a PlantUML component diagram of bundle dependencies.</description>
+    <requiresConcept refId="osgi:RequiresBundle"/>
+    <description>Generates a unified PlantUML component diagram of all bundle dependencies.</description>
     <cypher><![CDATA[
+        // Resolved dependencies
         MATCH (s:Osgi:Bundle)-[d:DEPENDS_ON]->(t:Osgi:Bundle)
-        RETURN DISTINCT s.bundleSymbolicName AS Source, t.bundleSymbolicName AS Target
-        ORDER BY Source, Target
+        RETURN DISTINCT s.bundleSymbolicName AS Source,
+               t.bundleSymbolicName AS Target,
+               d.viaRequireBundle AS ViaRequireBundle,
+               d.viaPackageWiring AS ViaPackageWiring,
+               true AS Resolved
+        UNION
+        // Unresolved Require-Bundle
+        MATCH (s:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
+        WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
+        RETURN DISTINCT s.bundleSymbolicName AS Source,
+               rb.symbolicName AS Target,
+               true AS ViaRequireBundle,
+               false AS ViaPackageWiring,
+               false AS Resolved
     ]]></cypher>
     <report type="Groovy">
-        <property name="scriptname">jqassistant/groovy/bundle-dependency-plantuml.groovy</property>
+        <property name="scriptname">groovy/bundle-dependency-plantuml.groovy</property>
         <!-- Optional: custom output file name (default: bundle-dependencies.puml) -->
         <property name="filename">my-dependencies.puml</property>
+        <!-- Optional: regex filter on bundle names (default: .* = all) -->
+        <property name="filter">com\.example\..*</property>
     </report>
 </concept>
 ----
 
-The `scriptname` property points to the Groovy script file on disk, or is loaded from the classpath (e.g., from a plugin JAR) if the file does not exist.
-The optional `filename` property controls the output file name (default: `bundle-dependencies.puml`).
+The diagram uses colored arrows to indicate dependency types:
+
+* *Black* = Require-Bundle only (normal bundle dependency)
+* *Blue* = Package wiring only (clean OSGi pattern)
+* *Green* = Both (redundant — package imports already covered by Require-Bundle)
+* *Red dashed* = Unresolved Require-Bundle (missing bundle, shown with gray background)
+
+The optional `filename` and `filter` properties control the output file name and bundle name filter respectively.
 The diagram is written to the jQAssistant report directory.
-
-==== Require-Bundle PlantUML Diagram
-
-A second Groovy script (`groovy/require-bundle-plantuml.groovy`) generates a PlantUML diagram specifically for Require-Bundle dependencies.
-Mandatory dependencies are shown as *red solid* arrows, optional ones as *blue dashed* arrows.
-Unresolved bundles (not found in the scan) are shown with a gray background.
-
-[source,xml]
-----
-<concept id="my-project:RequireBundlePlantUML">
-    <requiresConcept refId="osgi:RequiresBundle"/>
-    <description>Generates a PlantUML diagram of Require-Bundle dependencies.</description>
-    <cypher><![CDATA[
-        MATCH (source:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
-        OPTIONAL MATCH (rb)-[:RESOLVES_TO]->(target:Osgi:Bundle)
-        RETURN DISTINCT source.bundleSymbolicName AS Bundle,
-               rb.symbolicName AS RequiredBundle,
-               rb.optional AS Optional,
-               target.bundleSymbolicName IS NOT NULL AS Resolved
-        ORDER BY Bundle, RequiredBundle
-    ]]></cypher>
-    <report type="Groovy">
-        <property name="scriptname">groovy/require-bundle-plantuml.groovy</property>
-    </report>
-</concept>
-----

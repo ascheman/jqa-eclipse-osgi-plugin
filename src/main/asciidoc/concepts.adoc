@@ -240,31 +240,6 @@ The script is loaded from the classpath (shipped in this plugin's JAR), or from 
 [source,xml]
 ----
 <concept id="my-project:BundleDependencyPlantUML">
-    <requiresConcept refId="osgi:BundleDependency"/>
-    <requiresConcept refId="osgi:RequiresBundle"/>
-    <description>Generates a unified PlantUML component diagram of all bundle dependencies.</description>
-    <cypher><![CDATA[
-        // Resolved dependencies
-        MATCH (s:Osgi:Bundle)-[d:DEPENDS_ON]->(t:Osgi:Bundle)
-        RETURN DISTINCT s.bundleSymbolicName AS Source,
-               s.bundleVersion AS SourceVersion,
-               t.bundleSymbolicName AS Target,
-               t.bundleVersion AS TargetVersion,
-               d.viaRequireBundle AS ViaRequireBundle,
-               d.viaPackageWiring AS ViaPackageWiring,
-               true AS Resolved
-        UNION
-        // Unresolved Require-Bundle
-        MATCH (s:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
-        WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
-        RETURN DISTINCT s.bundleSymbolicName AS Source,
-               s.bundleVersion AS SourceVersion,
-               rb.symbolicName AS Target,
-               null AS TargetVersion,
-               true AS ViaRequireBundle,
-               false AS ViaPackageWiring,
-               false AS Resolved
-    ]]></cypher>
     <report type="Groovy">
         <property name="scriptname">groovy/bundle-dependency-plantuml.groovy</property>
         <!-- Optional: custom output file name (default: bundle-dependencies.puml) -->
@@ -281,6 +256,16 @@ The diagram uses colored arrows to indicate dependency types:
 * *Blue* = Package wiring only (clean OSGi pattern)
 * *Green* = Both (redundant — package imports already covered by Require-Bundle)
 * *Red dashed* = Unresolved Require-Bundle (missing bundle, shown with gray background)
+
+Edge labels show the type dependency count — the number of actual type-level references between the bundles' code.
+A count of 0 (shown as dotted line) means the dependency exists only in the manifest, not in the code.
+
+[NOTE]
+====
+For accurate type dependency counts, ensure `java-classpath:ResolveDependsOn` has been applied before running the diagram concepts.
+Add it to your project's analyze groups or as a `requiresConcept` on your diagram concept.
+Without it, all counts will be 0 because cross-bundle type references are not yet resolved.
+====
 
 The optional `filename` and `filter` properties control the output file name and bundle name filter respectively.
 The diagram is written to the jQAssistant report directory.

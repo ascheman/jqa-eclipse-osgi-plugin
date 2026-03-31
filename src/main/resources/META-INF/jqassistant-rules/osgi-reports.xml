@@ -10,8 +10,8 @@
 
     <!-- Adjacency pairs for bundle dependencies -->
     <concept id="osgi:BundleDependencyGraph">
-        <requiresConcept refId="osgi:BundleDependency"/>
-        <description>Returns bundle dependency adjacency pairs (source, target) with dependency types and versions.</description>
+        <requiresConcept refId="osgi:BundleDependencyWeight"/>
+        <description>Returns bundle dependency adjacency pairs (source, target) with dependency types, versions, and type dependency count.</description>
         <cypher><![CDATA[
             MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
             RETURN DISTINCT source.bundleSymbolicName AS Source,
@@ -19,8 +19,9 @@
                    target.bundleSymbolicName AS Target,
                    target.bundleVersion AS TargetVersion,
                    d.viaRequireBundle AS ViaRequireBundle,
-                   d.viaPackageWiring AS ViaPackageWiring
-            ORDER BY Source, Target
+                   d.viaPackageWiring AS ViaPackageWiring,
+                   d.typeDependencyCount AS TypeDependencyCount
+            ORDER BY Source, SourceVersion, Target, TargetVersion
         ]]></cypher>
     </concept>
 
@@ -38,7 +39,7 @@
                    rb.versionRange AS VersionRange,
                    rb.optional AS Optional,
                    target.bundleSymbolicName IS NOT NULL AS Resolved
-            ORDER BY Bundle, RequiredBundle
+            ORDER BY Bundle, BundleVersion, RequiredBundle
         ]]></cypher>
     </concept>
 

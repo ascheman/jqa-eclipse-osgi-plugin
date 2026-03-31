@@ -53,6 +53,7 @@ result.rows.each { row ->
     def viaRequireBundle = row.columns.get("ViaRequireBundle")?.value
     def viaPackageWiring = row.columns.get("ViaPackageWiring")?.value
     def resolved = row.columns.get("Resolved")?.value
+    def typeDepCount = row.columns.get("TypeDependencyCount")?.value
     if (source && target) {
         def srcId = sourceVersion ? "${source}_${sourceVersion}" : source
         def tgtId = targetVersion ? "${target}_${targetVersion}" : target
@@ -63,6 +64,7 @@ result.rows.each { row ->
         def rb = viaRequireBundle == true || viaRequireBundle == "true"
         def pw = viaPackageWiring == true || viaPackageWiring == "true"
         def res = resolved == true || resolved == "true"
+        def weight = (typeDepCount instanceof Number) ? typeDepCount.intValue() : 0
         if (!res) {
             unresolvedTargets.add(tgtId)
         }
@@ -71,7 +73,7 @@ result.rows.each { row ->
         else if (rb && pw) type = 'redundant'
         else if (rb) type = 'requireBundle'
         else type = 'packageWiring'
-        edges.add([source: srcId, target: tgtId, type: type])
+        edges.add([source: srcId, target: tgtId, type: type, weight: weight])
     }
 }
 
@@ -83,7 +85,7 @@ def nodesJson = nodes.collect { id, comp ->
 }.join(",\n")
 
 def edgesJson = edges.collect { edge ->
-    """      { "data": { "source": "${sanitizeId(edge.source)}", "target": "${sanitizeId(edge.target)}", "type": "${edge.type}" } }"""
+    """      { "data": { "source": "${sanitizeId(edge.source)}", "target": "${sanitizeId(edge.target)}", "type": "${edge.type}", "weight": ${edge.weight} } }"""
 }.join(",\n")
 
 def versionOptionsHtml = allVersions.collect { v -> """<option value="${v}">${v}</option>""" }.join("\n      ")

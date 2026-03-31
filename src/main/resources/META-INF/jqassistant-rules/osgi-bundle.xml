@@ -17,6 +17,7 @@
         <includeConcept refId="osgi:RequiresBundle"/>
         <includeConcept refId="osgi:RequiredBundleResolution"/>
         <includeConcept refId="osgi:BundleDependency"/>
+        <includeConcept refId="osgi:BundleDependencyWeight"/>
     </group>
 
     <!-- Mark JARs with Bundle-SymbolicName as OSGi Bundles -->
@@ -200,6 +201,22 @@
             MERGE (source)-[d:DEPENDS_ON]->(target)
             SET d.viaRequireBundle = viaRequireBundle, d.viaPackageWiring = viaPackageWiring
             RETURN source.bundleSymbolicName AS Source, target.bundleSymbolicName AS Target, d.viaRequireBundle AS ViaRequireBundle, d.viaPackageWiring AS ViaPackageWiring
+            ORDER BY Source, Target
+        ]]></cypher>
+    </concept>
+
+    <!-- Enrich DEPENDS_ON with type dependency counts -->
+    <concept id="osgi:BundleDependencyWeight">
+        <requiresConcept refId="osgi:BundleDependency"/>
+        <description>Counts actual type-level dependencies between bundles and stores them on the DEPENDS_ON relationship. A typeDependencyCount of 0 means the dependency exists only in the manifest, not in the code. Note: for accurate counts, ensure java-classpath:ResolveDependsOn has been applied first (e.g., by including it in your project's analyze groups).</description>
+        <cypher><![CDATA[
+            MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
+            OPTIONAL MATCH (source)-[:CONTAINS]->(st:Type)-[:DEPENDS_ON]->(tt:Type)<-[:CONTAINS]-(target)
+            WITH source, target, d, count(DISTINCT tt) AS typeCount
+            SET d.typeDependencyCount = typeCount
+            RETURN source.bundleSymbolicName AS Source, target.bundleSymbolicName AS Target,
+                   d.viaRequireBundle AS ViaRequireBundle, d.viaPackageWiring AS ViaPackageWiring,
+                   typeCount AS TypeDependencyCount
             ORDER BY Source, Target
         ]]></cypher>
     </concept>

@@ -38,6 +38,8 @@ def components = new LinkedHashMap<String, Map>()
 def unresolvedTargets = new LinkedHashSet<String>()
 def edges = []
 
+def filterPattern = ~filter
+
 result.rows.each { row ->
     def source = row.columns.get("Source")?.value?.toString()
     def target = row.columns.get("Target")?.value?.toString()
@@ -46,7 +48,7 @@ result.rows.each { row ->
     def viaRequireBundle = row.columns.get("ViaRequireBundle")?.value
     def viaPackageWiring = row.columns.get("ViaPackageWiring")?.value
     def resolved = row.columns.get("Resolved")?.value
-    if (source && target && source.matches(filter) && target.matches(filter)) {
+    if (source && target && (filterPattern.matcher(source).find() || filterPattern.matcher(target).find())) {
         def srcKey = componentKey(source, sourceVersion)
         def tgtKey = componentKey(target, targetVersion)
         components.put(srcKey, [name: source, version: sourceVersion])

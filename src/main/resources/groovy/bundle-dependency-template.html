@@ -65,9 +65,11 @@
     <button id="filterBtn">Apply</button>
   </div>
   <div class="sep">
+    <button id="undoBtn" title="Undo last action (Ctrl+Z)" disabled>Undo</button>
     <button id="focusBtn" title="Hide everything except selected nodes">Focus</button>
     <button id="compactBtn" title="Re-layout and zoom to fit visible nodes">Compact</button>
-    <button id="resetBtn">Reset</button>
+    <button id="resetBtn" title="Reset view, keep preset filter">Reset</button>
+    <button id="fullResetBtn" title="Reset view and clear all filters">Full Reset</button>
     <button id="exportSvgBtn">SVG</button>
   </div>
 </div>
@@ -92,7 +94,7 @@ function getLayoutConfigs() {
   var circleRadius = Math.max(80, visibleNodes * 40);
   return {
     dagre: { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 80, animate: false },
-    cose: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true },
+    cose: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, nodeRepulsion: function() { return 8000; }, idealEdgeLength: function() { return 120; }, nodeOverlap: 20, padding: 30 },
     breadthfirst: { name: 'breadthfirst', directed: true, animate: false, nodeDimensionsIncludeLabels: true, spacingFactor: 0.75 },
     grid: { name: 'grid', animate: false, nodeDimensionsIncludeLabels: true },
     circle: { name: 'circle', animate: false, nodeDimensionsIncludeLabels: true, radius: circleRadius, spacingFactor: 0.75 }
@@ -167,6 +169,76 @@ var cy = cytoscape({
   layout: layoutConfigs.dagre
 });
 
+// --- Undo: single-level state snapshot ---
+var previousState = null;
+var undoBtn = document.getElementById('undoBtn');
+
+function saveState() {
+  var visibleNodes = {};
+  var visibleEdges = {};
+  var positions = {};
+  var classes = {};
+  cy.nodes().forEach(function(n) {
+    visibleNodes[n.id()] = n.visible();
+    positions[n.id()] = { x: n.position('x'), y: n.position('y') };
+    classes[n.id()] = n.classes().join(' ');
+  });
+  cy.edges().forEach(function(e) {
+    visibleEdges[e.id()] = e.visible();
+    classes[e.id()] = e.classes().join(' ');
+  });
+  previousState = {
+    visibleNodes: visibleNodes,
+    visibleEdges: visibleEdges,
+    positions: positions,
+    classes: classes,
+    selectedNodeIds: selectedNodes.map(function(n) { return n.id(); }),
+    filterInput: document.getElementById('filterInput').value,
+    searchInput: document.getElementById('searchInput').value,
+    versionIndex: document.getElementById('versionFilter').selectedIndex,
+    toggles: {
+      requireBundle: document.getElementById('toggleRequireBundle').checked,
+      packageWiring: document.getElementById('togglePackageWiring').checked,
+      redundant: document.getElementById('toggleRedundant').checked,
+      unresolved: document.getElementById('toggleUnresolved').checked
+    }
+  };
+  undoBtn.disabled = false;
+}
+
+function restoreState() {
+  if (!previousState) return;
+  var s = previousState;
+  cy.nodes().forEach(function(n) {
+    if (s.visibleNodes[n.id()]) n.show(); else n.hide();
+    if (s.positions[n.id()]) n.position(s.positions[n.id()]);
+    n.classes(s.classes[n.id()] || '');
+  });
+  cy.edges().forEach(function(e) {
+    if (s.visibleEdges[e.id()]) e.show(); else e.hide();
+    e.classes(s.classes[e.id()] || '');
+  });
+  selectedNodes = cy.nodes().filter(function(n) { return s.selectedNodeIds.indexOf(n.id()) >= 0; });
+  document.getElementById('filterInput').value = s.filterInput;
+  document.getElementById('searchInput').value = s.searchInput;
+  document.getElementById('versionFilter').selectedIndex = s.versionIndex;
+  document.getElementById('toggleRequireBundle').checked = s.toggles.requireBundle;
+  document.getElementById('togglePackageWiring').checked = s.toggles.packageWiring;
+  document.getElementById('toggleRedundant').checked = s.toggles.redundant;
+  document.getElementById('toggleUnresolved').checked = s.toggles.unresolved;
+  previousState = null;
+  undoBtn.disabled = true;
+}
+
+undoBtn.addEventListener('click', restoreState);
+
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    restoreState();
+  }
+});
+
 // --- Compact: re-layout visible elements and zoom to fit ---
 function compactVisible() {
   var visible = cy.elements().filter(function(e) { return e.visible(); });
@@ -177,7 +249,10 @@ function compactVisible() {
   setTimeout(function() { cy.fit(visible, 30); }, 100);
 }
 
-document.getElementById('compactBtn').addEventListener('click', compactVisible);
+document.getElementById('compactBtn').addEventListener('click', function() {
+  saveState();
+  compactVisible();
+});
 
 // --- Filter helpers ---
 function getActiveNameRegex() {
@@ -217,6 +292,7 @@ function highlightSelection() {
 }
 
 cy.on('tap', 'node', function(evt) {
+  saveState();
   if (evt.originalEvent.shiftKey) {
     selectedNodes = selectedNodes.add(evt.target);
   } else {
@@ -226,6 +302,7 @@ cy.on('tap', 'node', function(evt) {
 });
 
 cy.on('dbltap', 'node', function(evt) {
+  saveState();
   var node = evt.target;
   selectedNodes = cy.collection().add(node);
   var neighborhood = node.neighborhood().add(node);
@@ -256,6 +333,7 @@ document.addEventListener('keydown', function(e) {
 
 document.getElementById('focusBtn').addEventListener('click', function() {
   if (selectedNodes.length === 0) return;
+  saveState();
   var neighborhood = selectedNodes.neighborhood().add(selectedNodes);
   cy.elements().forEach(function(ele) {
     if (neighborhood.contains(ele) && (ele.isEdge() || nodePassesFilter(ele))) {
@@ -298,6 +376,7 @@ function updateEdgeVisibility() {
 
 // --- Layout switcher ---
 document.getElementById('layoutSelect').addEventListener('change', function() {
+  saveState();
   applyFilters();
 });
 
@@ -357,14 +436,18 @@ function applyFilters() {
   compactVisible();
 }
 
-document.getElementById('filterBtn').addEventListener('click', applyFilters);
+document.getElementById('filterBtn').addEventListener('click', function() {
+  saveState();
+  applyFilters();
+});
 document.getElementById('filterInput').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') applyFilters();
+  if (e.key === 'Enter') { saveState(); applyFilters(); }
 });
 
-// --- Reset ---
-document.getElementById('resetBtn').addEventListener('click', function() {
-  document.getElementById('filterInput').value = filterValue;
+// --- Reset (keep preset filter) ---
+function resetView(clearFilter) {
+  saveState();
+  document.getElementById('filterInput').value = clearFilter ? '' : filterValue;
   document.getElementById('searchInput').value = '';
   document.getElementById('versionFilter').selectedIndex = 0;
   searchResults.textContent = '';
@@ -373,7 +456,11 @@ document.getElementById('resetBtn').addEventListener('click', function() {
     document.getElementById(id).checked = true;
   });
   selectedNodes = cy.collection();
-});
+  applyFilters();
+}
+
+document.getElementById('resetBtn').addEventListener('click', function() { resetView(false); });
+document.getElementById('fullResetBtn').addEventListener('click', function() { resetView(true); });
 
 // --- SVG export ---
 document.getElementById('exportSvgBtn').addEventListener('click', function() {

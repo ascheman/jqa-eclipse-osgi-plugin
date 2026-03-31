@@ -89,7 +89,7 @@
             MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
             WHERE ip.fqn =~ '^[a-zA-Z].*'
               AND NOT EXISTS {
-                MATCH (bundle)-[:CONTAINS]->(t:Type)-[:DEPENDS_ON]->(dep:Type)
+                MATCH (bundle)-[:CONTAINS*1..2]->(t:Type)-[:DEPENDS_ON]->(dep:Type)
                 WHERE dep.fqn STARTS WITH ip.fqn + '.'
               }
             RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, ip.fqn AS UnusedPackageImport, ip.optional AS Optional
@@ -106,7 +106,7 @@
             MATCH (source:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(target:Osgi:Bundle)
             WHERE source <> target
               AND NOT EXISTS {
-                MATCH (source)-[:CONTAINS]->(t:Type)-[:DEPENDS_ON]->(dep:Type)<-[:CONTAINS]-(target)
+                MATCH (source)-[:CONTAINS*1..2]->(t:Type)-[:DEPENDS_ON]->(dep:Type)<-[:CONTAINS*1..2]-(target)
               }
             RETURN DISTINCT source.bundleSymbolicName AS Bundle, source.bundleVersion AS BundleVersion, target.bundleSymbolicName AS UnusedRequiredBundle, target.bundleVersion AS RequiredBundleVersion
             ORDER BY Bundle, UnusedRequiredBundle

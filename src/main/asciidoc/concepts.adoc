@@ -110,6 +110,20 @@ Represents a single package exported by a bundle via the https://docs.osgi.org/s
 | EXPORTS_PACKAGE  | <<:Osgi:ExportedPackage>>  | 0..n        | Declares an exported package
 |====
 
+.Relations from `:Osgi:ExportedPackage` to `:Java:Package`
+[options="header"]
+|====
+| Name              | Target label(s)    | Cardinality | Description
+| DESCRIBES_PACKAGE | <<:Java:Package>>  | 0..n        | Links the OSGi export declaration to the actual Java package containing the types
+|====
+
+.Relations from `:Osgi:Bundle` to `:Osgi:ExportedPackage` (code usage)
+[options="header"]
+|====
+| Name          | Target label(s)            | Cardinality | Description
+| USES_PACKAGE  | <<:Osgi:ExportedPackage>>  | 0..n        | Indicates the bundle's code depends on types from this exported package of another bundle (`typeDependencyCount` property)
+|====
+
 .Relations from `:Osgi:ExportedPackage` to `:Osgi:ImportedPackage`
 [options="header"]
 |====
@@ -259,13 +273,7 @@ The diagram uses colored arrows to indicate dependency types:
 
 Edge labels show the type dependency count — the number of actual type-level references between the bundles' code.
 A count of 0 (shown as dotted line) means the dependency exists only in the manifest, not in the code.
-
-[NOTE]
-====
-For accurate type dependency counts, ensure `java-classpath:ResolveDependsOn` has been applied before running the diagram concepts.
-Add it to your project's analyze groups or as a `requiresConcept` on your diagram concept.
-Without it, all counts will be 0 because cross-bundle type references are not yet resolved.
-====
+The `java-classpath:ResolveDependsOn` concept is automatically applied as a dependency to ensure cross-bundle type resolution.
 
 The optional `filename`, `filter`, and `groupPattern` properties control the output file name, bundle name filter, and visual grouping respectively.
 The diagram is written to the jQAssistant report directory.

@@ -208,10 +208,11 @@
     <!-- Enrich DEPENDS_ON with type dependency counts -->
     <concept id="osgi:BundleDependencyWeight">
         <requiresConcept refId="osgi:BundleDependency"/>
-        <description>Counts actual type-level dependencies between bundles and stores them on the DEPENDS_ON relationship. A typeDependencyCount of 0 means the dependency exists only in the manifest, not in the code. Note: for accurate counts, ensure java-classpath:ResolveDependsOn has been applied first (e.g., by including it in your project's analyze groups).</description>
+        <requiresConcept refId="java-classpath:ResolveDependsOn"/>
+        <description>Counts actual type-level dependencies between bundles and stores them on the DEPENDS_ON relationship. A typeDependencyCount of 0 means the dependency exists only in the manifest, not in the code.</description>
         <cypher><![CDATA[
             MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
-            OPTIONAL MATCH (source)-[:CONTAINS]->(st:Type)-[:DEPENDS_ON]->(tt:Type)<-[:CONTAINS]-(target)
+            OPTIONAL MATCH (source)-[:CONTAINS*1..2]->(st:Type)-[:DEPENDS_ON]->(tt:Type)<-[:CONTAINS*1..2]-(target)
             WITH source, target, d, count(DISTINCT tt) AS typeCount
             SET d.typeDependencyCount = typeCount
             RETURN source.bundleSymbolicName AS Source, target.bundleSymbolicName AS Target,

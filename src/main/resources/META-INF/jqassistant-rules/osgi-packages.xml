@@ -7,6 +7,8 @@
         <includeConcept refId="osgi:ExportedPackage"/>
         <includeConcept refId="osgi:ImportedPackage"/>
         <includeConcept refId="osgi:PackageWiring"/>
+        <includeConcept refId="osgi:ExportedPackageResolution"/>
+        <includeConcept refId="osgi:PackageCodeUsage"/>
         <includeConcept refId="osgi:BundleClassPath"/>
     </group>
 
@@ -36,6 +38,44 @@
               AND NOT (ep)-[:SATISFIES]->(ip)
             CREATE (ep)-[:SATISFIES]->(ip)
             RETURN ep.fqn AS Package, ep.bundleSymbolicName AS Exporter, ip.bundleSymbolicName AS Importer
+        ]]></cypher>
+    </concept>
+
+    <!-- Link ExportedPackage to actual Java Package in the same bundle -->
+    <concept id="osgi:ExportedPackageResolution">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:ExportedPackage"/>
+        <description>Creates DESCRIBES_PACKAGE relationships from ExportedPackage nodes to the actual Java Package nodes in the same bundle. This bridges the OSGi manifest metadata with the Java type system.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:EXPORTS_PACKAGE]->(ep:Osgi:ExportedPackage)
+            MATCH (bundle)-[:CONTAINS]->(p:Java:Package)
+            WHERE ep.fqn = p.fqn
+              AND NOT (ep)-[:DESCRIBES_PACKAGE]->(p)
+            CREATE (ep)-[:DESCRIBES_PACKAGE]->(p)
+            RETURN DISTINCT ep.fqn AS ExportedPackage, ep.bundleSymbolicName AS Bundle
+            ORDER BY Bundle, ExportedPackage
+        ]]></cypher>
+    </concept>
+
+    <!-- Detect actual code usage of exported packages across bundles -->
+    <concept id="osgi:PackageCodeUsage">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:ExportedPackageResolution"/>
+        <requiresConcept refId="java-classpath:ResolveDependsOn"/>
+        <description>Creates USES_PACKAGE relationships from bundles to ExportedPackage nodes of other bundles when the bundle's code actually depends on types from those packages. This detects real code-level dependencies regardless of Import-Package declarations.</description>
+        <cypher><![CDATA[
+            MATCH (consumer:Osgi:Bundle)-[:CONTAINS*1..2]->(t:Type)-[:DEPENDS_ON]->(dep:Type)
+            MATCH (dep)<-[:CONTAINS]-(p:Java:Package)<-[:DESCRIBES_PACKAGE]-(ep:Osgi:ExportedPackage)
+                  <-[:EXPORTS_PACKAGE]-(provider:Osgi:Bundle)
+            WHERE consumer <> provider
+            WITH DISTINCT consumer, ep, provider, count(DISTINCT dep) AS typeCount
+            MERGE (consumer)-[u:USES_PACKAGE]->(ep)
+            SET u.typeDependencyCount = typeCount
+            RETURN consumer.bundleSymbolicName AS Consumer,
+                   ep.fqn AS Package,
+                   provider.bundleSymbolicName AS Provider,
+                   typeCount AS TypeCount
+            ORDER BY Consumer, Package
         ]]></cypher>
     </concept>
 

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OSGi Bundle Dependencies</title>
+<script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/dagre@0.8/dist/dagre.min.js"></script>
+<script src="https://unpkg.com/cytoscape-dagre@2/cytoscape-dagre.js"></script>
+<script src="https://unpkg.com/cytoscape-svg@0.4/cytoscape-svg.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  #toolbar { padding: 6px 10px; background: #f5f5f5; border-bottom: 1px solid #ccc; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12px; }
+  #toolbar label { cursor: pointer; display: flex; align-items: center; gap: 3px; }
+  #toolbar input[type="text"] { padding: 3px 6px; width: 180px; font-size: 12px; }
+  #toolbar select { padding: 3px 6px; font-size: 12px; }
+  #toolbar button { padding: 3px 8px; font-size: 12px; cursor: pointer; }
+  #cy { flex: 1; }
+  .sep { display: flex; gap: 6px; align-items: center; padding: 0 6px; border-left: 1px solid #ddd; }
+  .sep:first-child { border-left: none; }
+  .lbl { font-weight: bold; color: #666; margin-right: 2px; }
+  .lc { width: 20px; height: 3px; display: inline-block; vertical-align: middle; }
+  .lc.dashed { border-top: 2px dashed; height: 0; background: none; }
+  #searchResults { font-size: 11px; color: #666; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <div class="sep">
+    <span class="lbl">Legend:</span>
+    <span><span class="lc" style="background:#333"></span> Require-Bundle</span>
+    <span><span class="lc" style="background:#2196F3"></span> Package</span>
+    <span><span class="lc" style="background:#4CAF50"></span> Redundant</span>
+    <span><span class="lc dashed" style="border-color:#F44336"></span> Unresolved</span>
+  </div>
+  <div class="sep">
+    <span class="lbl">Show:</span>
+    <label><input type="checkbox" id="toggleRequireBundle" checked> Require-Bundle</label>
+    <label><input type="checkbox" id="togglePackageWiring" checked> Package</label>
+    <label><input type="checkbox" id="toggleRedundant" checked> Redundant</label>
+    <label><input type="checkbox" id="toggleUnresolved" checked> Unresolved</label>
+  </div>
+  <div class="sep">
+    <span class="lbl">Layout:</span>
+    <select id="layoutSelect">
+      <option value="dagre" selected>Hierarchical</option>
+      <option value="cose">Force-directed</option>
+      <option value="breadthfirst">Breadthfirst</option>
+      <option value="grid">Grid</option>
+      <option value="circle">Circle</option>
+    </select>
+  </div>
+  <div class="sep">
+    <span class="lbl">Search:</span>
+    <input type="text" id="searchInput" placeholder="Incremental regex...">
+    <span id="searchResults"></span>
+  </div>
+  <div class="sep">
+    <span class="lbl">Filter:</span>
+    <input type="text" id="filterInput" placeholder="Bundle name regex..." value="@@FILTER_VALUE@@">
+    <select id="versionFilter" multiple size="1" title="Select versions (Ctrl+click for multi)">
+      <option value="" selected>All versions</option>
+      @@VERSION_OPTIONS@@
+    </select>
+    <button id="filterBtn">Apply</button>
+  </div>
+  <div class="sep">
+    <button id="focusBtn" title="Hide everything except selected nodes">Focus</button>
+    <button id="resetBtn">Reset</button>
+    <button id="exportSvgBtn">SVG</button>
+  </div>
+</div>
+<div id="toolbar" style="padding: 3px 10px; background: #fafafa; border-bottom: 1px solid #eee; font-size: 11px; color: #888;">
+  Click: highlight neighborhood | Shift+Click: add to selection | Double-click: focus on neighborhood | Esc: clear
+</div>
+<div id="cy"></div>
+<script>
+var graphData = {
+  nodes: [
+@@NODES_JSON@@
+  ],
+  edges: [
+@@EDGES_JSON@@
+  ]
+};
+
+var filterValue = '@@FILTER_VALUE_JS@@';
+
+var layoutConfigs = {
+  dagre: { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 80, animate: false },
+  cose: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true },
+  breadthfirst: { name: 'breadthfirst', directed: true, animate: false, nodeDimensionsIncludeLabels: true },
+  grid: { name: 'grid', animate: false, nodeDimensionsIncludeLabels: true },
+  circle: { name: 'circle', animate: false, nodeDimensionsIncludeLabels: true }
+};
+
+var cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: graphData,
+  style: [
+    { selector: 'node', style: {
+      'label': 'data(label)',
+      'text-wrap': 'wrap',
+      'text-valign': 'center',
+      'text-halign': 'center',
+      'font-size': '10px',
+      'background-color': '#e0e0e0',
+      'border-width': 1,
+      'border-color': '#999',
+      'shape': 'round-rectangle',
+      'width': 'label',
+      'height': 'label',
+      'padding': '10px'
+    }},
+    { selector: 'node[nodeClass="unresolved"]', style: {
+      'background-color': '#ddd',
+      'border-style': 'dashed',
+      'border-color': '#F44336'
+    }},
+    { selector: 'node.selected', style: {
+      'background-color': '#FFEB3B',
+      'border-width': 2,
+      'border-color': '#333'
+    }},
+    { selector: 'node.search-match', style: {
+      'background-color': '#FFF9C4',
+      'border-width': 2,
+      'border-color': '#FF9800'
+    }},
+    { selector: 'node.faded', style: {
+      'opacity': 0.12
+    }},
+    { selector: 'edge', style: {
+      'curve-style': 'bezier',
+      'target-arrow-shape': 'triangle',
+      'arrow-scale': 0.8,
+      'width': 2
+    }},
+    { selector: 'edge[type="requireBundle"]', style: {
+      'line-color': '#333',
+      'target-arrow-color': '#333'
+    }},
+    { selector: 'edge[type="packageWiring"]', style: {
+      'line-color': '#2196F3',
+      'target-arrow-color': '#2196F3'
+    }},
+    { selector: 'edge[type="redundant"]', style: {
+      'line-color': '#4CAF50',
+      'target-arrow-color': '#4CAF50',
+      'width': 3
+    }},
+    { selector: 'edge[type="unresolved"]', style: {
+      'line-color': '#F44336',
+      'target-arrow-color': '#F44336',
+      'line-style': 'dashed'
+    }},
+    { selector: 'edge.faded', style: {
+      'opacity': 0.06
+    }}
+  ],
+  layout: layoutConfigs.dagre
+});
+
+// --- Filter helpers ---
+function getActiveNameRegex() {
+  try { return new RegExp(document.getElementById('filterInput').value || '.*'); }
+  catch(e) { return new RegExp('.*'); }
+}
+
+function getActiveVersions() {
+  var sel = document.getElementById('versionFilter');
+  var versions = Array.from(sel.selectedOptions).map(function(o) { return o.value; });
+  return (versions.length > 0 && versions[0] !== '') ? versions : null;
+}
+
+function nodePassesFilter(node) {
+  var nameMatch = getActiveNameRegex().test(node.data('name'));
+  var versions = getActiveVersions();
+  var versionMatch = !versions || versions.indexOf(node.data('version')) >= 0;
+  return nameMatch && versionMatch;
+}
+
+// --- Selection management ---
+var selectedNodes = cy.collection();
+
+function clearSelection() {
+  cy.elements().removeClass('faded').removeClass('selected');
+  selectedNodes = cy.collection();
+}
+
+function highlightSelection() {
+  if (selectedNodes.length === 0) { clearSelection(); return; }
+  var neighborhood = selectedNodes.neighborhood().add(selectedNodes);
+  cy.elements().addClass('faded');
+  neighborhood.filter(function(ele) {
+    return ele.isEdge() || nodePassesFilter(ele);
+  }).removeClass('faded');
+  selectedNodes.addClass('selected');
+}
+
+cy.on('tap', 'node', function(evt) {
+  if (evt.originalEvent.shiftKey) {
+    selectedNodes = selectedNodes.add(evt.target);
+  } else {
+    selectedNodes = cy.collection().add(evt.target);
+  }
+  highlightSelection();
+});
+
+cy.on('dbltap', 'node', function(evt) {
+  var node = evt.target;
+  selectedNodes = cy.collection().add(node);
+  var neighborhood = node.neighborhood().add(node);
+  cy.elements().forEach(function(ele) {
+    if (neighborhood.contains(ele) && (ele.isEdge() || nodePassesFilter(ele))) {
+      ele.show().removeClass('faded');
+    } else {
+      ele.hide();
+    }
+  });
+  // Hide edges where either endpoint is hidden
+  cy.edges().forEach(function(edge) {
+    var src = cy.getElementById(edge.data('source'));
+    var tgt = cy.getElementById(edge.data('target'));
+    if (!src.visible() || !tgt.visible()) edge.hide();
+  });
+  node.addClass('selected');
+});
+
+cy.on('tap', function(evt) {
+  if (evt.target === cy) clearSelection();
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') clearSelection();
+});
+
+document.getElementById('focusBtn').addEventListener('click', function() {
+  if (selectedNodes.length === 0) return;
+  var neighborhood = selectedNodes.neighborhood().add(selectedNodes);
+  cy.elements().forEach(function(ele) {
+    if (neighborhood.contains(ele) && (ele.isEdge() || nodePassesFilter(ele))) {
+      ele.show().removeClass('faded');
+    } else {
+      ele.hide();
+    }
+  });
+  // Hide edges where either endpoint is hidden
+  cy.edges().forEach(function(edge) {
+    var src = cy.getElementById(edge.data('source'));
+    var tgt = cy.getElementById(edge.data('target'));
+    if (!src.visible() || !tgt.visible()) edge.hide();
+  });
+  selectedNodes.addClass('selected');
+});
+
+// --- Toggle edge types ---
+function updateEdgeVisibility() {
+  var types = {
+    requireBundle: document.getElementById('toggleRequireBundle').checked,
+    packageWiring: document.getElementById('togglePackageWiring').checked,
+    redundant: document.getElementById('toggleRedundant').checked,
+    unresolved: document.getElementById('toggleUnresolved').checked
+  };
+  cy.edges().forEach(function(edge) {
+    if (types[edge.data('type')]) edge.show(); else edge.hide();
+  });
+  cy.nodes().forEach(function(node) {
+    if (node.hidden()) return;
+    var visibleEdges = node.connectedEdges().filter(function(e) { return e.visible(); });
+    if (visibleEdges.length === 0) node.hide(); else node.show();
+  });
+}
+
+['toggleRequireBundle', 'togglePackageWiring', 'toggleRedundant', 'toggleUnresolved'].forEach(function(id) {
+  document.getElementById(id).addEventListener('change', updateEdgeVisibility);
+});
+
+// --- Layout switcher ---
+document.getElementById('layoutSelect').addEventListener('change', function() {
+  cy.layout(layoutConfigs[this.value]).run();
+});
+
+// --- Incremental search ---
+var searchInput = document.getElementById('searchInput');
+var searchResults = document.getElementById('searchResults');
+
+searchInput.addEventListener('input', function() {
+  cy.nodes().removeClass('search-match');
+  var val = this.value.trim();
+  if (!val) { searchResults.textContent = ''; return; }
+  try {
+    var regex = new RegExp(val, 'i');
+    var matches = cy.nodes().filter(function(n) { return regex.test(n.data('name')); });
+    matches.addClass('search-match');
+    searchResults.textContent = matches.length + ' match' + (matches.length !== 1 ? 'es' : '');
+  } catch(e) {
+    searchResults.textContent = 'invalid regex';
+  }
+});
+
+searchInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    var matches = cy.nodes('.search-match');
+    if (matches.length > 0) {
+      selectedNodes = matches;
+      highlightSelection();
+      cy.fit(matches, 50);
+    }
+  }
+  if (e.key === 'Escape') {
+    this.value = '';
+    cy.nodes().removeClass('search-match');
+    searchResults.textContent = '';
+    clearSelection();
+  }
+});
+
+// --- Filter ---
+function applyFilters() {
+  var nameRegex = new RegExp(document.getElementById('filterInput').value || '.*');
+  var versionSelect = document.getElementById('versionFilter');
+  var selectedVersions = Array.from(versionSelect.selectedOptions).map(function(o) { return o.value; });
+  var filterByVersion = selectedVersions.length > 0 && selectedVersions[0] !== '';
+
+  cy.nodes().forEach(function(node) {
+    var nameMatch = nameRegex.test(node.data('name'));
+    var versionMatch = !filterByVersion || selectedVersions.indexOf(node.data('version')) >= 0;
+    if (nameMatch && versionMatch) node.show(); else node.hide();
+  });
+  cy.edges().forEach(function(edge) {
+    var src = cy.getElementById(edge.data('source'));
+    var tgt = cy.getElementById(edge.data('target'));
+    if (src.visible() && tgt.visible()) edge.show(); else edge.hide();
+  });
+  updateEdgeVisibility();
+}
+
+document.getElementById('filterBtn').addEventListener('click', applyFilters);
+document.getElementById('filterInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') applyFilters();
+});
+
+// --- Reset ---
+document.getElementById('resetBtn').addEventListener('click', function() {
+  document.getElementById('filterInput').value = filterValue;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('versionFilter').selectedIndex = 0;
+  searchResults.textContent = '';
+  cy.elements().show().removeClass('faded').removeClass('selected').removeClass('search-match');
+  ['toggleRequireBundle', 'togglePackageWiring', 'toggleRedundant', 'toggleUnresolved'].forEach(function(id) {
+    document.getElementById(id).checked = true;
+  });
+  selectedNodes = cy.collection();
+});
+
+// --- SVG export ---
+document.getElementById('exportSvgBtn').addEventListener('click', function() {
+  var svgContent = cy.svg({ scale: 1, full: true });
+  var blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'bundle-dependencies.svg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// --- Auto-apply filter on load if preset ---
+if (filterValue) {
+  applyFilters();
+}
+</script>
+</body>
+</html>

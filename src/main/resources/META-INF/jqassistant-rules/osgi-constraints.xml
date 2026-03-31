@@ -16,6 +16,7 @@
 
     <!-- Detect unresolved Require-Bundle references -->
     <constraint id="osgi:UnresolvedRequiredBundle">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:RequiredBundleResolution"/>
         <description>Finds Require-Bundle entries that cannot be resolved to any bundle in the scanned project. These may indicate missing dependencies.</description>
         <cypher><![CDATA[
@@ -28,6 +29,7 @@
 
     <!-- Detect fragments referencing non-existent host bundles -->
     <constraint id="osgi:UnresolvedFragmentHost">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:FragmentResolvesToHost"/>
         <description>Finds fragment bundles whose Fragment-Host cannot be resolved to any bundle in the scanned project.</description>
         <cypher><![CDATA[
@@ -40,6 +42,7 @@
 
     <!-- Detect circular bundle dependencies -->
     <constraint id="osgi:CircularBundleDependency">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:RequiredBundleResolution"/>
         <description>Detects circular dependencies between bundles via Require-Bundle (A requires B requires A).</description>
         <cypher><![CDATA[
@@ -65,6 +68,7 @@
 
     <!-- Imported packages not satisfied by any export -->
     <constraint id="osgi:UnsatisfiedImport">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:PackageWiring"/>
         <description>Finds Import-Package entries that are not satisfied by any Export-Package in the scanned project. Optional imports are excluded.</description>
         <cypher><![CDATA[
@@ -78,6 +82,7 @@
 
     <!-- Imported packages not referenced by any type in the bundle -->
     <constraint id="osgi:UnusedImportedPackage">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:ImportedPackage"/>
         <description>Finds Import-Package entries where no type in the bundle depends on any type from the imported package. These may indicate unnecessary imports that should be removed from the manifest.</description>
         <cypher><![CDATA[
@@ -94,6 +99,7 @@
 
     <!-- Required bundles not referenced by any type in the bundle -->
     <constraint id="osgi:UnusedRequiredBundle" severity="info">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:RequiredBundleResolution"/>
         <description>Finds Require-Bundle entries where no type in the requiring bundle depends on any type contained in the required bundle. These may indicate unnecessary bundle dependencies. Note: runtime-only dependencies (e.g., OSGi Declarative Services, extension points, reflection-based loading) are expected false positives.</description>
         <cypher><![CDATA[
@@ -109,6 +115,7 @@
 
     <!-- Import-Package entries already covered by Require-Bundle -->
     <constraint id="osgi:RedundantPackageImport" severity="info">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:ImportedPackage"/>
         <requiresConcept refId="osgi:ExportedPackage"/>
         <requiresConcept refId="osgi:RequiredBundleResolution"/>

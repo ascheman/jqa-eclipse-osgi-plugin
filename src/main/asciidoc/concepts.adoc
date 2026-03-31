@@ -247,7 +247,9 @@ The script is loaded from the classpath (shipped in this plugin's JAR), or from 
         // Resolved dependencies
         MATCH (s:Osgi:Bundle)-[d:DEPENDS_ON]->(t:Osgi:Bundle)
         RETURN DISTINCT s.bundleSymbolicName AS Source,
+               s.bundleVersion AS SourceVersion,
                t.bundleSymbolicName AS Target,
+               t.bundleVersion AS TargetVersion,
                d.viaRequireBundle AS ViaRequireBundle,
                d.viaPackageWiring AS ViaPackageWiring,
                true AS Resolved
@@ -256,7 +258,9 @@ The script is loaded from the classpath (shipped in this plugin's JAR), or from 
         MATCH (s:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
         WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
         RETURN DISTINCT s.bundleSymbolicName AS Source,
+               s.bundleVersion AS SourceVersion,
                rb.symbolicName AS Target,
+               null AS TargetVersion,
                true AS ViaRequireBundle,
                false AS ViaPackageWiring,
                false AS Resolved

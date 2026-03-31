@@ -170,6 +170,7 @@
 
     <!-- Create bundle-level dependency relationships -->
     <concept id="osgi:BundleDependency">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:RequiredBundleResolution"/>
         <requiresConcept refId="osgi:PackageWiring"/>
         <description>Creates DEPENDS_ON relationships between bundles based on Require-Bundle resolution and Import/Export package wiring. Properties viaRequireBundle and viaPackageWiring indicate the dependency source.</description>

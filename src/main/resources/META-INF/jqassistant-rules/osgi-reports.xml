@@ -26,6 +26,7 @@
 
     <!-- Adjacency pairs for Require-Bundle dependencies -->
     <concept id="osgi:RequireBundleGraph">
+        <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:RequiresBundle"/>
         <description>Returns Require-Bundle adjacency pairs (source, required) with version ranges. Includes both resolved and unresolved entries.</description>
         <cypher><![CDATA[

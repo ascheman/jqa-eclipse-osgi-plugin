@@ -66,6 +66,7 @@
   </div>
   <div class="sep">
     <button id="focusBtn" title="Hide everything except selected nodes">Focus</button>
+    <button id="compactBtn" title="Re-layout and zoom to fit visible nodes">Compact</button>
     <button id="resetBtn">Reset</button>
     <button id="exportSvgBtn">SVG</button>
   </div>
@@ -86,13 +87,18 @@ var graphData = {
 
 var filterValue = '@@FILTER_VALUE_JS@@';
 
-var layoutConfigs = {
-  dagre: { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 80, animate: false },
-  cose: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true },
-  breadthfirst: { name: 'breadthfirst', directed: true, animate: false, nodeDimensionsIncludeLabels: true },
-  grid: { name: 'grid', animate: false, nodeDimensionsIncludeLabels: true },
-  circle: { name: 'circle', animate: false, nodeDimensionsIncludeLabels: true }
-};
+function getLayoutConfigs() {
+  var visibleNodes = cy ? cy.nodes().filter(function(n) { return n.visible(); }).length : 10;
+  var circleRadius = Math.max(80, visibleNodes * 40);
+  return {
+    dagre: { name: 'dagre', rankDir: 'TB', nodeSep: 50, rankSep: 80, animate: false },
+    cose: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true },
+    breadthfirst: { name: 'breadthfirst', directed: true, animate: false, nodeDimensionsIncludeLabels: true, spacingFactor: 0.75 },
+    grid: { name: 'grid', animate: false, nodeDimensionsIncludeLabels: true },
+    circle: { name: 'circle', animate: false, nodeDimensionsIncludeLabels: true, radius: circleRadius, spacingFactor: 0.75 }
+  };
+}
+var layoutConfigs = getLayoutConfigs();
 
 var cy = cytoscape({
   container: document.getElementById('cy'),
@@ -161,6 +167,18 @@ var cy = cytoscape({
   layout: layoutConfigs.dagre
 });
 
+// --- Compact: re-layout visible elements and zoom to fit ---
+function compactVisible() {
+  var visible = cy.elements().filter(function(e) { return e.visible(); });
+  if (visible.length === 0) return;
+  layoutConfigs = getLayoutConfigs();
+  var currentLayout = document.getElementById('layoutSelect').value;
+  visible.layout(layoutConfigs[currentLayout]).run();
+  setTimeout(function() { cy.fit(visible, 30); }, 100);
+}
+
+document.getElementById('compactBtn').addEventListener('click', compactVisible);
+
 // --- Filter helpers ---
 function getActiveNameRegex() {
   try { return new RegExp(document.getElementById('filterInput').value || '.*'); }
@@ -225,6 +243,7 @@ cy.on('dbltap', 'node', function(evt) {
     if (!src.visible() || !tgt.visible()) edge.hide();
   });
   node.addClass('selected');
+  compactVisible();
 });
 
 cy.on('tap', function(evt) {
@@ -252,6 +271,7 @@ document.getElementById('focusBtn').addEventListener('click', function() {
     if (!src.visible() || !tgt.visible()) edge.hide();
   });
   selectedNodes.addClass('selected');
+  compactVisible();
 });
 
 // --- Toggle edge types ---
@@ -278,7 +298,7 @@ function updateEdgeVisibility() {
 
 // --- Layout switcher ---
 document.getElementById('layoutSelect').addEventListener('change', function() {
-  cy.layout(layoutConfigs[this.value]).run();
+  applyFilters();
 });
 
 // --- Incremental search ---
@@ -334,6 +354,7 @@ function applyFilters() {
     if (src.visible() && tgt.visible()) edge.show(); else edge.hide();
   });
   updateEdgeVisibility();
+  compactVisible();
 }
 
 document.getElementById('filterBtn').addEventListener('click', applyFilters);

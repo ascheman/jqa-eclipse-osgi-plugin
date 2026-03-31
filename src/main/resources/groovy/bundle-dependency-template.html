@@ -66,6 +66,12 @@
     <button id="filterBtn">Apply</button>
   </div>
   <div class="sep">
+    <span class="lbl">Group:</span>
+    <input type="text" id="groupInput" placeholder="Regex with capture group..." value="@@GROUP_PATTERN@@" title="Regex with capture group to extract group name, e.g. com\.example\.(app|shared)\..*">
+    <button id="groupBtn">Group</button>
+    <button id="ungroupBtn">Ungroup</button>
+  </div>
+  <div class="sep">
     <button id="undoBtn" title="Undo last action (Ctrl+Z)" disabled>Undo</button>
     <button id="focusBtn" title="Hide everything except selected nodes">Focus</button>
     <button id="compactBtn" title="Re-layout and zoom to fit visible nodes">Compact</button>
@@ -89,6 +95,7 @@ var graphData = {
 };
 
 var filterValue = '@@FILTER_VALUE_JS@@';
+var groupPatternValue = '@@GROUP_PATTERN_JS@@';
 
 function getLayoutConfigs() {
   var visibleNodes = cy ? cy.nodes().filter(function(n) { return n.visible(); }).length : 10;
@@ -120,6 +127,20 @@ var cy = cytoscape({
       'width': 'label',
       'height': 'label',
       'padding': '10px'
+    }},
+    { selector: 'node[nodeClass="group"]', style: {
+      'background-color': '#f0f0f0',
+      'background-opacity': 0.5,
+      'border-width': 2,
+      'border-color': '#aaa',
+      'border-style': 'dashed',
+      'shape': 'round-rectangle',
+      'text-valign': 'top',
+      'text-halign': 'center',
+      'font-size': '12px',
+      'font-weight': 'bold',
+      'color': '#666',
+      'padding': '20px'
     }},
     { selector: 'node[nodeClass="unresolved"]', style: {
       'background-color': '#ddd',
@@ -255,6 +276,7 @@ document.addEventListener('keydown', function(e) {
 // --- Compact: re-layout visible elements and zoom to fit ---
 function compactVisible() {
   var visible = cy.elements().filter(function(e) { return e.visible(); });
+  console.log('[compact] visible elements:', visible.length, 'nodes:', visible.filter(function(e) { return e.isNode(); }).length);
   if (visible.length === 0) return;
   var visibleNodes = visible.filter(function(e) { return e.isNode(); });
   var currentLayout = document.getElementById('layoutSelect').value;
@@ -289,6 +311,7 @@ function getActiveVersions() {
 }
 
 function nodePassesFilter(node) {
+  if (node.data('nodeClass') === 'group') return true;
   var nameMatch = getActiveNameRegex().test(node.data('name'));
   var versions = getActiveVersions();
   var versionMatch = !versions || versions.indexOf(node.data('version')) >= 0;
@@ -386,9 +409,14 @@ function updateEdgeVisibility() {
     if (types[edge.data('type')]) edge.show(); else edge.hide();
   });
   cy.nodes().forEach(function(node) {
-    if (node.hidden()) return;
+    if (node.hidden() || node.data('nodeClass') === 'group') return;
     var visibleEdges = node.connectedEdges().filter(function(e) { return e.visible(); });
     if (visibleEdges.length === 0) node.hide(); else node.show();
+  });
+  // Hide group nodes with no visible children
+  cy.nodes('[nodeClass="group"]').forEach(function(group) {
+    var visibleChildren = group.children().filter(function(c) { return c.visible(); });
+    if (visibleChildren.length === 0) group.hide(); else group.show();
   });
 }
 
@@ -439,15 +467,23 @@ searchInput.addEventListener('keydown', function(e) {
 
 // --- Filter ---
 function applyFilters() {
+  console.log('[filter] applying filters');
   var nameRegex = new RegExp(document.getElementById('filterInput').value || '.*');
   var versionSelect = document.getElementById('versionFilter');
   var selectedVersions = Array.from(versionSelect.selectedOptions).map(function(o) { return o.value; });
   var filterByVersion = selectedVersions.length > 0 && selectedVersions[0] !== '';
 
   cy.nodes().forEach(function(node) {
+    // Always show group (parent) nodes — their visibility depends on children
+    if (node.data('nodeClass') === 'group') { node.show(); return; }
     var nameMatch = nameRegex.test(node.data('name'));
     var versionMatch = !filterByVersion || selectedVersions.indexOf(node.data('version')) >= 0;
     if (nameMatch && versionMatch) node.show(); else node.hide();
+  });
+  // Hide group nodes that have no visible children
+  cy.nodes('[nodeClass="group"]').forEach(function(group) {
+    var visibleChildren = group.children().filter(function(c) { return c.visible(); });
+    if (visibleChildren.length === 0) group.hide();
   });
   cy.edges().forEach(function(edge) {
     var src = cy.getElementById(edge.data('source'));
@@ -469,7 +505,9 @@ document.getElementById('filterInput').addEventListener('keydown', function(e) {
 // --- Reset (keep preset filter) ---
 function resetView(clearFilter) {
   saveState();
+  removeGroupingQuiet();
   document.getElementById('filterInput').value = clearFilter ? '' : filterValue;
+  document.getElementById('groupInput').value = clearFilter ? '' : groupPatternValue;
   document.getElementById('searchInput').value = '';
   document.getElementById('versionFilter').selectedIndex = 0;
   searchResults.textContent = '';
@@ -479,6 +517,7 @@ function resetView(clearFilter) {
   });
   selectedNodes = cy.collection();
   applyFilters();
+  if (!clearFilter && groupPatternValue) applyGrouping();
 }
 
 document.getElementById('resetBtn').addEventListener('click', function() { resetView(false); });
@@ -498,9 +537,81 @@ document.getElementById('exportSvgBtn').addEventListener('click', function() {
   URL.revokeObjectURL(url);
 });
 
-// --- Auto-apply filter on load if preset ---
+// --- Dynamic grouping ---
+function applyGrouping() {
+  var pattern = document.getElementById('groupInput').value.trim();
+  console.log('[group] applyGrouping, pattern:', pattern);
+  if (!pattern) { removeGrouping(); return; }
+  saveState();
+  var regex;
+  try { regex = new RegExp(pattern); } catch(e) { console.error('[group] invalid regex:', e); return; }
+
+  // First remove existing groups
+  removeGroupingQuiet();
+
+  // Find groups
+  var groupMap = {}; // groupName -> [nodeIds]
+  cy.nodes().forEach(function(node) {
+    if (node.data('nodeClass') === 'group') return;
+    var name = node.data('name');
+    if (!name) return;
+    var match = regex.exec(name);
+    if (match && match[1]) {
+      var groupName = match[1];
+      if (!groupMap[groupName]) groupMap[groupName] = [];
+      groupMap[groupName].push(node.id());
+    }
+  });
+
+  console.log('[group] found groups:', Object.keys(groupMap));
+
+  // Create parent nodes and assign children
+  Object.keys(groupMap).sort().forEach(function(groupName) {
+    var groupId = 'group_' + groupName.replace(/[^a-zA-Z0-9_]/g, '_');
+    console.log('[group] creating group:', groupId, 'with', groupMap[groupName].length, 'children');
+    cy.add({ data: { id: groupId, label: groupName, nodeClass: 'group' } });
+    groupMap[groupName].forEach(function(nodeId) {
+      var node = cy.getElementById(nodeId);
+      if (node.length > 0) {
+        node.move({ parent: groupId });
+      } else {
+        console.warn('[group] node not found:', nodeId);
+      }
+    });
+  });
+
+  console.log('[group] total nodes after grouping:', cy.nodes().length, 'visible:', cy.nodes().filter(function(n) { return n.visible(); }).length);
+  compactVisible();
+}
+
+function removeGroupingQuiet() {
+  // Move all children out of groups without saving state or relayout
+  var groupNodes = cy.nodes('[nodeClass="group"]');
+  console.log('[group] removing', groupNodes.length, 'group nodes');
+  groupNodes.forEach(function(parent) {
+    parent.children().move({ parent: null });
+  });
+  groupNodes.remove();
+}
+
+function removeGrouping() {
+  saveState();
+  removeGroupingQuiet();
+  compactVisible();
+}
+
+document.getElementById('groupBtn').addEventListener('click', applyGrouping);
+document.getElementById('groupInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') applyGrouping();
+});
+document.getElementById('ungroupBtn').addEventListener('click', removeGrouping);
+
+// --- Auto-apply filter and grouping on load if preset ---
 if (filterValue) {
   applyFilters();
+}
+if (groupPatternValue) {
+  applyGrouping();
 }
 </script>
 </body>

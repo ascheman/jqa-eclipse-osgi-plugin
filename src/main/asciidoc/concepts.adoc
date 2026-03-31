@@ -267,5 +267,23 @@ Add it to your project's analyze groups or as a `requiresConcept` on your diagra
 Without it, all counts will be 0 because cross-bundle type references are not yet resolved.
 ====
 
-The optional `filename` and `filter` properties control the output file name and bundle name filter respectively.
+The optional `filename`, `filter`, and `groupPattern` properties control the output file name, bundle name filter, and visual grouping respectively.
 The diagram is written to the jQAssistant report directory.
+
+==== Grouping bundles
+
+The `groupPattern` report property accepts a regex with a capture group that extracts the group name from the bundle symbolic name.
+Bundles matching the pattern are visually grouped together.
+
+Example: given bundles `com.mycompany.app.one.model`, `com.mycompany.app.two.api`, `com.mycompany.shared.logging`, `com.mycompany.base.core`:
+
+[source,xml]
+----
+<property name="groupPattern">com\.mycompany\.(shared|app\.(?:one|two)|base)\..*</property>
+----
+
+This creates four groups: `app.one`, `app.two`, `shared`, `base`.
+Bundles that don't match the pattern remain ungrouped.
+
+In PlantUML, groups are rendered as `package` blocks.
+In the HTML graph, groups are rendered as Cytoscape.js compound (parent) nodes.

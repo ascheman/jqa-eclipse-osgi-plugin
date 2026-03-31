@@ -18,9 +18,11 @@
 // Optional report properties:
 //   filename        - output file name (default: bundle-dependencies.puml)
 //   filter          - regex to match bundle names (default: .* = all bundles)
+//   groupPattern    - regex with capture group to extract group name from bundle name
 
 def fileName = concept.report.properties.get("filename") ?: "bundle-dependencies.puml"
 def filter = concept.report.properties.get("filter") ?: ".*"
+def groupPatternStr = concept.report.properties.get("groupPattern")
 def outputFile = new File(reportDirectory, fileName)
 
 logger.info("Generating PlantUML bundle dependency diagram: {} (filter: {})", outputFile.absolutePath, filter)
@@ -30,7 +32,7 @@ def sanitize = { String name ->
 }
 
 def componentKey = { String name, String version ->
-    version ? "${name}_${version}" : name
+    version ? "${name}_${version}".toString() : name
 }
 
 // Map of componentKey -> [name, version]
@@ -39,6 +41,7 @@ def unresolvedTargets = new LinkedHashSet<String>()
 def edges = []
 
 def filterPattern = ~filter
+logger.info("PlantUML filter pattern: '{}', result rows: {}", filter, result.rows.size())
 
 result.rows.each { row ->
     def source = row.columns.get("Source")?.value?.toString()
@@ -48,7 +51,11 @@ result.rows.each { row ->
     def viaRequireBundle = row.columns.get("ViaRequireBundle")?.value
     def viaPackageWiring = row.columns.get("ViaPackageWiring")?.value
     def resolved = row.columns.get("Resolved")?.value
-    if (source && target && (filterPattern.matcher(source).find() || filterPattern.matcher(target).find())) {
+    def typeDepCount = row.columns.get("TypeDependencyCount")?.value
+    def srcMatch = source ? filterPattern.matcher(source).find() : false
+    def tgtMatch = target ? filterPattern.matcher(target).find() : false
+    logger.debug("PlantUML row: {} -> {}, srcMatch={}, tgtMatch={}", source, target, srcMatch, tgtMatch)
+    if (source && target && srcMatch && tgtMatch) {
         def srcKey = componentKey(source, sourceVersion)
         def tgtKey = componentKey(target, targetVersion)
         components.put(srcKey, [name: source, version: sourceVersion])
@@ -56,11 +63,32 @@ result.rows.each { row ->
         def rb = viaRequireBundle == true || viaRequireBundle == "true"
         def pw = viaPackageWiring == true || viaPackageWiring == "true"
         def res = resolved == true || resolved == "true"
+        def weight = (typeDepCount instanceof Number) ? typeDepCount.intValue() : 0
         if (!res) {
             unresolvedTargets.add(tgtKey)
         }
-        edges.add([sourceKey: srcKey, targetKey: tgtKey, viaRequireBundle: rb, viaPackageWiring: pw, resolved: res])
+        edges.add([sourceKey: srcKey, targetKey: tgtKey, viaRequireBundle: rb, viaPackageWiring: pw, resolved: res, weight: weight])
     }
+}
+
+// --- Compute groups ---
+def groupPattern = groupPatternStr ? ~groupPatternStr : null
+def groups = new LinkedHashMap<String, List>() // groupName -> [componentKeys]
+def nodeGroups = [:] // componentKey -> groupName
+
+if (groupPattern) {
+    components.each { key, comp ->
+        if (!comp?.name) return
+        def matcher = groupPattern.matcher(comp.name)
+        if (matcher.find() && matcher.groupCount() >= 1) {
+            def groupName = matcher.group(1)
+            if (groupName) {
+                groups.computeIfAbsent(groupName, { [] }).add(key)
+                nodeGroups[key] = groupName
+            }
+        }
+    }
+    logger.info("Grouping: {} groups found: {}", groups.size(), groups.keySet())
 }
 
 outputFile.withWriter('UTF-8') { writer ->
@@ -70,11 +98,30 @@ outputFile.withWriter('UTF-8') { writer ->
     writer.writeLine('    BackgroundColor<<unresolved>> LightGray')
     writer.writeLine('}')
     writer.writeLine('')
+    // Write grouped components
+    groups.sort { a, b -> a.key <=> b.key }.each { groupName, keys ->
+        logger.info("Group '{}': keys={}", groupName, keys)
+        writer.writeLine("package \"${groupName}\" {")
+        keys.sort().each { key ->
+            def comp = components[key]
+            logger.info("  key='{}', comp={}, inComponents={}", key, comp, components.containsKey(key))
+            if (!comp) return // skip if component was filtered out
+            def alias = sanitize(key)
+            def label = comp.version ? "${comp.name}\\n${comp.version}" : comp.name
+            def stereotype = unresolvedTargets.contains(key) ? ' <<unresolved>>' : ''
+            writer.writeLine("    [${label}] as ${alias}${stereotype}")
+        }
+        writer.writeLine("}")
+        writer.writeLine('')
+    }
+    // Write ungrouped components
     components.sort { a, b -> a.key <=> b.key }.each { key, comp ->
-        def alias = sanitize(key)
-        def label = comp.version ? "${comp.name}\\n${comp.version}" : comp.name
-        def stereotype = unresolvedTargets.contains(key) ? ' <<unresolved>>' : ''
-        writer.writeLine("[${label}] as ${alias}${stereotype}")
+        if (!nodeGroups.containsKey(key)) {
+            def alias = sanitize(key)
+            def label = comp.version ? "${comp.name}\\n${comp.version}" : comp.name
+            def stereotype = unresolvedTargets.contains(key) ? ' <<unresolved>>' : ''
+            writer.writeLine("[${label}] as ${alias}${stereotype}")
+        }
     }
     writer.writeLine('')
     edges.sort { a, b -> a.sourceKey <=> b.sourceKey ?: a.targetKey <=> b.targetKey }.each { edge ->
@@ -93,7 +140,8 @@ outputFile.withWriter('UTF-8') { writer ->
             style = '-->'
             color = '#blue'
         }
-        writer.writeLine("${sanitize(edge.sourceKey)} ${style} ${sanitize(edge.targetKey)} ${color}")
+        def weightLabel = edge.weight != null ? " : ${edge.weight}" : ""
+        writer.writeLine("${sanitize(edge.sourceKey)} ${style} ${sanitize(edge.targetKey)} ${color}${weightLabel}")
     }
     writer.writeLine('')
     writer.writeLine('legend right')

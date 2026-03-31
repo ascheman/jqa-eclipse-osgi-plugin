@@ -14,9 +14,12 @@
 // Optional report properties:
 //   filename        - output file name (default: bundle-dependencies.html)
 //   filter          - regex to match bundle names (default: .* = all bundles)
+//   groupPattern    - regex with capture group to extract group name from bundle name
+//                     e.g. "com\\.mycompany\\.(shared|app\\.(?:one|two)|base)\\..*"
 
 def fileName = concept.report.properties.get("filename") ?: "bundle-dependencies.html"
 def filter = concept.report.properties.get("filter") ?: ".*"
+def groupPattern = concept.report.properties.get("groupPattern") ?: ""
 def outputFile = new File(reportDirectory, fileName)
 
 logger.info("Generating interactive HTML bundle dependency graph: {} (filter: {})", outputFile.absolutePath, filter)
@@ -55,8 +58,8 @@ result.rows.each { row ->
     def resolved = row.columns.get("Resolved")?.value
     def typeDepCount = row.columns.get("TypeDependencyCount")?.value
     if (source && target) {
-        def srcId = sourceVersion ? "${source}_${sourceVersion}" : source
-        def tgtId = targetVersion ? "${target}_${targetVersion}" : target
+        def srcId = sourceVersion ? "${source}_${sourceVersion}".toString() : source
+        def tgtId = targetVersion ? "${target}_${targetVersion}".toString() : target
         nodes.put(srcId, [name: source, version: sourceVersion])
         nodes.put(tgtId, [name: target, version: targetVersion])
         if (sourceVersion) allVersions.add(sourceVersion)
@@ -93,6 +96,8 @@ def versionOptionsHtml = allVersions.collect { v -> """<option value="${v}">${v}
 def rawFilter = (filter == ".*") ? "" : filter
 def filterValueHtml = rawFilter.replace('&', '&amp;').replace('"', '&quot;')
 def filterValueJs = rawFilter.replace('\\', '\\\\').replace("'", "\\'")
+def groupPatternHtml = groupPattern.replace('&', '&amp;').replace('"', '&quot;')
+def groupPatternJs = groupPattern.replace('\\', '\\\\').replace("'", "\\'")
 
 // --- Replace placeholders and write ---
 def html = template
@@ -101,6 +106,8 @@ def html = template
     .replace('@@VERSION_OPTIONS@@', versionOptionsHtml)
     .replace('@@FILTER_VALUE@@', filterValueHtml)
     .replace('@@FILTER_VALUE_JS@@', filterValueJs)
+    .replace('@@GROUP_PATTERN@@', groupPatternHtml)
+    .replace('@@GROUP_PATTERN_JS@@', groupPatternJs)
 
 outputFile.withWriter('UTF-8') { writer ->
     writer.write(html)

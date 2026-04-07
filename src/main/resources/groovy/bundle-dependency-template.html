@@ -15,13 +15,19 @@
   #toolbar input[type="text"] { padding: 3px 6px; width: 180px; font-size: 12px; }
   #toolbar select { padding: 3px 6px; font-size: 12px; }
   #toolbar button { padding: 3px 8px; font-size: 12px; cursor: pointer; }
-  #cy { flex: 1; }
+  #cy { flex: 1; min-height: 0; }
   .sep { display: flex; gap: 6px; align-items: center; padding: 0 6px; border-left: 1px solid #ddd; }
   .sep:first-child { border-left: none; }
   .lbl { font-weight: bold; color: #666; margin-right: 2px; }
   .lc { width: 20px; height: 3px; display: inline-block; vertical-align: middle; }
   .lc.dashed { border-top: 2px dashed; height: 0; background: none; }
   #searchResults { font-size: 11px; color: #666; }
+  #debugPanel { display: none; border-top: 2px solid #999; background: #1e1e1e; color: #d4d4d4; font-family: monospace; font-size: 11px; max-height: 200px; overflow-y: auto; padding: 4px 8px; }
+  #debugPanel.visible { display: block; }
+  #debugPanel .trace-action { color: #569cd6; }
+  #debugPanel .trace-state { color: #6a9955; }
+  #debugPanel .trace-warn { color: #ce9178; }
+  #debugPanel .trace-time { color: #808080; }
 </style>
 </head>
 <body>
@@ -31,8 +37,9 @@
     <span><span class="lc" style="background:#333"></span> Require-Bundle</span>
     <span><span class="lc" style="background:#2196F3"></span> Package</span>
     <span><span class="lc" style="background:#4CAF50"></span> Redundant</span>
-    <span><span class="lc dashed" style="border-color:#F44336"></span> Unresolved</span>
-    <span style="color:#888">| Edge label = type dependency count (dotted if 0)</span>
+    <span><span class="lc dashed" style="border-color:#FF9800"></span> Unresolved</span>
+    <span><span class="lc" style="background:#F44336; height:1px"></span> Unused (0 types)</span>
+    <span style="color:#888">| Edge label = type dependency count</span>
   </div>
   <div class="sep">
     <span class="lbl">Show:</span>
@@ -40,6 +47,7 @@
     <label><input type="checkbox" id="togglePackageWiring" checked> Package</label>
     <label><input type="checkbox" id="toggleRedundant" checked> Redundant</label>
     <label><input type="checkbox" id="toggleUnresolved" checked> Unresolved</label>
+    <label><input type="checkbox" id="toggleUnused" checked> Unused (0)</label>
   </div>
   <div class="sep">
     <span class="lbl">Layout:</span>
@@ -78,12 +86,15 @@
     <button id="resetBtn" title="Reset view, keep preset filter">Reset</button>
     <button id="fullResetBtn" title="Reset view and clear all filters">Full Reset</button>
     <button id="exportSvgBtn">SVG</button>
+    <button id="debugBtn" title="Toggle debug trace panel">Debug</button>
+    <button id="exportTraceBtn" title="Download trace as JSON" style="display:none">Export Trace</button>
   </div>
 </div>
 <div id="toolbar" style="padding: 3px 10px; background: #fafafa; border-bottom: 1px solid #eee; font-size: 11px; color: #888;">
-  Click: highlight neighborhood | Shift+Click: add to selection | Double-click: focus on neighborhood | Esc: clear
+  Click: highlight neighborhood | Shift/Ctrl/Cmd+Click: add to selection | Double-click: focus on neighborhood | Focus: show only selected + neighbors | Esc: clear
 </div>
 <div id="cy"></div>
+<div id="debugPanel"></div>
 <script>
 var graphData = {
   nodes: [
@@ -96,6 +107,63 @@ var graphData = {
 
 var filterValue = '@@FILTER_VALUE_JS@@';
 var groupPatternValue = '@@GROUP_PATTERN_JS@@';
+
+// --- Debug trace ---
+var traceEnabled = false;
+var traceLog = [];
+var debugPanel = document.getElementById('debugPanel');
+var debugBtn = document.getElementById('debugBtn');
+var exportTraceBtn = document.getElementById('exportTraceBtn');
+
+function trace(category, action, details) {
+  var entry = {
+    time: new Date().toISOString(),
+    seq: traceLog.length,
+    category: category,
+    action: action,
+    details: details || {}
+  };
+  traceLog.push(entry);
+  console.log('[trace]', category, action, JSON.stringify(details || {}));
+  if (traceEnabled) {
+    var cls = category === 'state' ? 'trace-state' : category === 'warn' ? 'trace-warn' : 'trace-action';
+    var line = document.createElement('div');
+    line.innerHTML = '<span class="trace-time">' + entry.time.substring(11, 23) + '</span> '
+      + '<span class="' + cls + '">[' + category + ']</span> '
+      + action + ' ' + (details ? '<span class="trace-state">' + JSON.stringify(details) + '</span>' : '');
+    debugPanel.appendChild(line);
+    debugPanel.scrollTop = debugPanel.scrollHeight;
+  }
+}
+
+function getGraphState() {
+  var visibleNodes = cy ? cy.nodes().filter(function(n) { return n.visible() && n.data('nodeClass') !== 'group'; }).map(function(n) { return n.id(); }) : [];
+  var visibleEdges = cy ? cy.edges().filter(function(e) { return e.visible(); }).length : 0;
+  var selected = selectedNodes ? selectedNodes.map(function(n) { return n.id(); }) : [];
+  return { visibleNodes: visibleNodes, visibleEdges: visibleEdges, selected: selected, totalNodes: cy ? cy.nodes().filter(function(n) { return n.data('nodeClass') !== 'group'; }).length : 0 };
+}
+
+debugBtn.addEventListener('click', function() {
+  traceEnabled = !traceEnabled;
+  debugPanel.classList.toggle('visible');
+  exportTraceBtn.style.display = traceEnabled ? '' : 'none';
+  debugBtn.style.background = traceEnabled ? '#ffeb3b' : '';
+  if (traceEnabled) {
+    trace('state', 'debug-enabled', getGraphState());
+  }
+});
+
+exportTraceBtn.addEventListener('click', function() {
+  var blob = new Blob([JSON.stringify(traceLog, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'osgi-graph-trace.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
 
 function getLayoutConfigs() {
   var visibleNodes = cy ? cy.nodes().filter(function(n) { return n.visible(); }).length : 10;
@@ -145,7 +213,7 @@ var cy = cytoscape({
     { selector: 'node[nodeClass="unresolved"]', style: {
       'background-color': '#ddd',
       'border-style': 'dashed',
-      'border-color': '#F44336'
+      'border-color': '#FF9800'
     }},
     { selector: 'node.selected', style: {
       'background-color': '#FFEB3B',
@@ -173,6 +241,8 @@ var cy = cytoscape({
     }},
     { selector: 'edge[weight = 0]', style: {
       'width': 1,
+      'line-color': '#F44336',
+      'target-arrow-color': '#F44336',
       'line-style': 'dotted',
       'label': '0'
     }},
@@ -192,8 +262,8 @@ var cy = cytoscape({
       'target-arrow-color': '#4CAF50'
     }},
     { selector: 'edge[type="unresolved"]', style: {
-      'line-color': '#F44336',
-      'target-arrow-color': '#F44336',
+      'line-color': '#FF9800',
+      'target-arrow-color': '#FF9800',
       'line-style': 'dashed'
     }},
     { selector: 'edge.faded', style: {
@@ -234,7 +304,8 @@ function saveState() {
       requireBundle: document.getElementById('toggleRequireBundle').checked,
       packageWiring: document.getElementById('togglePackageWiring').checked,
       redundant: document.getElementById('toggleRedundant').checked,
-      unresolved: document.getElementById('toggleUnresolved').checked
+      unresolved: document.getElementById('toggleUnresolved').checked,
+      unused: document.getElementById('toggleUnused').checked
     }
   };
   undoBtn.disabled = false;
@@ -260,15 +331,20 @@ function restoreState() {
   document.getElementById('togglePackageWiring').checked = s.toggles.packageWiring;
   document.getElementById('toggleRedundant').checked = s.toggles.redundant;
   document.getElementById('toggleUnresolved').checked = s.toggles.unresolved;
+  document.getElementById('toggleUnused').checked = s.toggles.unused;
   previousState = null;
   undoBtn.disabled = true;
 }
 
-undoBtn.addEventListener('click', restoreState);
+undoBtn.addEventListener('click', function() {
+  trace('action', 'undo', {});
+  restoreState();
+});
 
 document.addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
     e.preventDefault();
+    trace('action', 'undo-keyboard', {});
     restoreState();
   }
 });
@@ -276,7 +352,7 @@ document.addEventListener('keydown', function(e) {
 // --- Compact: re-layout visible elements and zoom to fit ---
 function compactVisible() {
   var visible = cy.elements().filter(function(e) { return e.visible(); });
-  console.log('[compact] visible elements:', visible.length, 'nodes:', visible.filter(function(e) { return e.isNode(); }).length);
+  trace('state', 'compact', { visibleElements: visible.length, visibleNodes: visible.filter(function(e) { return e.isNode(); }).length });
   if (visible.length === 0) return;
   var visibleNodes = visible.filter(function(e) { return e.isNode(); });
   var currentLayout = document.getElementById('layoutSelect').value;
@@ -294,6 +370,7 @@ function compactVisible() {
 }
 
 document.getElementById('compactBtn').addEventListener('click', function() {
+  trace('action', 'compact', getGraphState());
   saveState();
   compactVisible();
 });
@@ -338,17 +415,21 @@ function highlightSelection() {
 
 cy.on('tap', 'node', function(evt) {
   saveState();
-  if (evt.originalEvent.shiftKey) {
+  var multiSelect = evt.originalEvent.shiftKey || evt.originalEvent.ctrlKey || evt.originalEvent.metaKey;
+  trace('action', 'tap-node', { node: evt.target.id(), multiSelect: multiSelect, selectedBefore: selectedNodes.map(function(n) { return n.id(); }) });
+  if (multiSelect) {
     selectedNodes = selectedNodes.add(evt.target);
   } else {
     selectedNodes = cy.collection().add(evt.target);
   }
+  trace('state', 'after-tap', { selected: selectedNodes.map(function(n) { return n.id(); }) });
   highlightSelection();
 });
 
 cy.on('dbltap', 'node', function(evt) {
   saveState();
   var node = evt.target;
+  trace('action', 'dbltap-node', { node: node.id() });
   selectedNodes = cy.collection().add(node);
   var neighborhood = node.neighborhood().add(node);
   cy.elements().forEach(function(ele) {
@@ -365,11 +446,15 @@ cy.on('dbltap', 'node', function(evt) {
     if (!src.visible() || !tgt.visible()) edge.hide();
   });
   node.addClass('selected');
+  trace('state', 'after-dbltap', getGraphState());
   compactVisible();
 });
 
 cy.on('tap', function(evt) {
-  if (evt.target === cy) clearSelection();
+  if (evt.target === cy) {
+    trace('action', 'tap-background', {});
+    clearSelection();
+  }
 });
 
 document.addEventListener('keydown', function(e) {
@@ -377,23 +462,50 @@ document.addEventListener('keydown', function(e) {
 });
 
 document.getElementById('focusBtn').addEventListener('click', function() {
-  if (selectedNodes.length === 0) return;
+  trace('action', 'focus', { selected: selectedNodes.map(function(n) { return n.id(); }) });
+  if (selectedNodes.length === 0) {
+    trace('warn', 'focus-empty', { msg: 'no nodes selected' });
+    return;
+  }
   saveState();
+
+  // First show all elements, remove faded state
+  cy.elements().show().removeClass('faded').removeClass('selected');
+
+  // Compute neighborhood from selected nodes
   var neighborhood = selectedNodes.neighborhood().add(selectedNodes);
-  cy.elements().forEach(function(ele) {
-    if (neighborhood.contains(ele) && (ele.isEdge() || nodePassesFilter(ele))) {
-      ele.show().removeClass('faded');
+  var neighborIds = neighborhood.filter(function(e) { return e.isNode(); }).map(function(n) { return n.id(); });
+  trace('state', 'focus-neighborhood', { neighborhoodNodes: neighborIds, neighborhoodTotal: neighborhood.length });
+
+  // Show neighborhood nodes, hide everything else
+  cy.nodes().forEach(function(node) {
+    if (node.data('nodeClass') === 'group') return; // handle groups separately
+    if (neighborhood.contains(node) && nodePassesFilter(node)) {
+      node.show();
     } else {
-      ele.hide();
+      node.hide();
     }
   });
-  // Hide edges where either endpoint is hidden
+
+  // Show edges within neighborhood, hide others
   cy.edges().forEach(function(edge) {
-    var src = cy.getElementById(edge.data('source'));
-    var tgt = cy.getElementById(edge.data('target'));
-    if (!src.visible() || !tgt.visible()) edge.hide();
+    if (neighborhood.contains(edge)) {
+      var src = cy.getElementById(edge.data('source'));
+      var tgt = cy.getElementById(edge.data('target'));
+      if (src.visible() && tgt.visible()) { edge.show(); } else { edge.hide(); }
+    } else {
+      edge.hide();
+    }
   });
+
+  // Show group nodes that have visible children, hide empty ones
+  cy.nodes('[nodeClass="group"]').forEach(function(group) {
+    var visibleChildren = group.children().filter(function(c) { return c.visible(); });
+    if (visibleChildren.length > 0) { group.show(); } else { group.hide(); }
+  });
+
   selectedNodes.addClass('selected');
+  trace('state', 'after-focus', getGraphState());
   compactVisible();
 });
 
@@ -405,8 +517,12 @@ function updateEdgeVisibility() {
     redundant: document.getElementById('toggleRedundant').checked,
     unresolved: document.getElementById('toggleUnresolved').checked
   };
+  var showUnused = document.getElementById('toggleUnused').checked;
   cy.edges().forEach(function(edge) {
-    if (types[edge.data('type')]) edge.show(); else edge.hide();
+    var typeVisible = types[edge.data('type')];
+    var weight = edge.data('weight');
+    var unusedVisible = (weight > 0) || showUnused;
+    if (typeVisible && unusedVisible) edge.show(); else edge.hide();
   });
   cy.nodes().forEach(function(node) {
     if (node.hidden() || node.data('nodeClass') === 'group') return;
@@ -420,12 +536,16 @@ function updateEdgeVisibility() {
   });
 }
 
-['toggleRequireBundle', 'togglePackageWiring', 'toggleRedundant', 'toggleUnresolved'].forEach(function(id) {
-  document.getElementById(id).addEventListener('change', updateEdgeVisibility);
+['toggleRequireBundle', 'togglePackageWiring', 'toggleRedundant', 'toggleUnresolved', 'toggleUnused'].forEach(function(id) {
+  document.getElementById(id).addEventListener('change', function() {
+    trace('action', 'toggle-' + id, { checked: this.checked });
+    updateEdgeVisibility();
+  });
 });
 
 // --- Layout switcher ---
 document.getElementById('layoutSelect').addEventListener('change', function() {
+  trace('action', 'layout-change', { layout: this.value });
   saveState();
   compactVisible();
 });
@@ -467,7 +587,7 @@ searchInput.addEventListener('keydown', function(e) {
 
 // --- Filter ---
 function applyFilters() {
-  console.log('[filter] applying filters');
+  trace('action', 'apply-filters', { filter: document.getElementById('filterInput').value });
   var nameRegex = new RegExp(document.getElementById('filterInput').value || '.*');
   var versionSelect = document.getElementById('versionFilter');
   var selectedVersions = Array.from(versionSelect.selectedOptions).map(function(o) { return o.value; });
@@ -491,6 +611,7 @@ function applyFilters() {
     if (src.visible() && tgt.visible()) edge.show(); else edge.hide();
   });
   updateEdgeVisibility();
+  trace('state', 'after-filter', getGraphState());
   compactVisible();
 }
 
@@ -504,6 +625,7 @@ document.getElementById('filterInput').addEventListener('keydown', function(e) {
 
 // --- Reset (keep preset filter) ---
 function resetView(clearFilter) {
+  trace('action', clearFilter ? 'full-reset' : 'reset', {});
   saveState();
   removeGroupingQuiet();
   document.getElementById('filterInput').value = clearFilter ? '' : filterValue;
@@ -512,7 +634,7 @@ function resetView(clearFilter) {
   document.getElementById('versionFilter').selectedIndex = 0;
   searchResults.textContent = '';
   cy.elements().show().removeClass('faded').removeClass('selected').removeClass('search-match');
-  ['toggleRequireBundle', 'togglePackageWiring', 'toggleRedundant', 'toggleUnresolved'].forEach(function(id) {
+  ['toggleRequireBundle', 'togglePackageWiring', 'toggleRedundant', 'toggleUnresolved', 'toggleUnused'].forEach(function(id) {
     document.getElementById(id).checked = true;
   });
   selectedNodes = cy.collection();
@@ -540,7 +662,7 @@ document.getElementById('exportSvgBtn').addEventListener('click', function() {
 // --- Dynamic grouping ---
 function applyGrouping() {
   var pattern = document.getElementById('groupInput').value.trim();
-  console.log('[group] applyGrouping, pattern:', pattern);
+  trace('action', 'apply-grouping', { pattern: pattern });
   if (!pattern) { removeGrouping(); return; }
   saveState();
   var regex;
@@ -563,31 +685,31 @@ function applyGrouping() {
     }
   });
 
-  console.log('[group] found groups:', Object.keys(groupMap));
+  trace('state', 'groups-found', { groups: Object.keys(groupMap) });
 
   // Create parent nodes and assign children
   Object.keys(groupMap).sort().forEach(function(groupName) {
     var groupId = 'group_' + groupName.replace(/[^a-zA-Z0-9_]/g, '_');
-    console.log('[group] creating group:', groupId, 'with', groupMap[groupName].length, 'children');
+    trace('state', 'create-group', { groupId: groupId, children: groupMap[groupName].length });
     cy.add({ data: { id: groupId, label: groupName, nodeClass: 'group' } });
     groupMap[groupName].forEach(function(nodeId) {
       var node = cy.getElementById(nodeId);
       if (node.length > 0) {
         node.move({ parent: groupId });
       } else {
-        console.warn('[group] node not found:', nodeId);
+        trace('warn', 'group-node-not-found', { nodeId: nodeId });
       }
     });
   });
 
-  console.log('[group] total nodes after grouping:', cy.nodes().length, 'visible:', cy.nodes().filter(function(n) { return n.visible(); }).length);
+  trace('state', 'after-grouping', getGraphState());
   compactVisible();
 }
 
 function removeGroupingQuiet() {
   // Move all children out of groups without saving state or relayout
   var groupNodes = cy.nodes('[nodeClass="group"]');
-  console.log('[group] removing', groupNodes.length, 'group nodes');
+  trace('state', 'removing-groups', { count: groupNodes.length });
   groupNodes.forEach(function(parent) {
     parent.children().move({ parent: null });
   });
@@ -595,6 +717,7 @@ function removeGroupingQuiet() {
 }
 
 function removeGrouping() {
+  trace('action', 'remove-grouping', {});
   saveState();
   removeGroupingQuiet();
   compactVisible();
@@ -613,6 +736,14 @@ if (filterValue) {
 if (groupPatternValue) {
   applyGrouping();
 }
+
+trace('state', 'page-loaded', {
+  totalNodes: graphData.nodes.length,
+  totalEdges: graphData.edges.length,
+  filterValue: filterValue,
+  groupPattern: groupPatternValue,
+  graphState: getGraphState()
+});
 </script>
 </body>
 </html>

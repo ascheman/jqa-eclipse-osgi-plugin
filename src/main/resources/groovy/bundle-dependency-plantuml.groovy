@@ -126,29 +126,33 @@ outputFile.withWriter('UTF-8') { writer ->
     writer.writeLine('')
     edges.sort { a, b -> a.sourceKey <=> b.sourceKey ?: a.targetKey <=> b.targetKey }.each { edge ->
         def style
-        def color
+        def color = 'blue'
         if (!edge.resolved) {
-            style = '..>'
-            color = '#red'
+            style = '..'
+            color = 'orange'
+        } else if (edge.weight == 0) {
+            style = '..'
+            color = 'red'
         } else if (edge.viaRequireBundle && edge.viaPackageWiring) {
-            style = '-->'
-            color = '#green'
+            style = '--'
+            color = 'green'
         } else if (edge.viaRequireBundle) {
-            style = '-->'
-            color = '#black'
+            style = '--'
+            color = 'black'
         } else {
-            style = '-->'
-            color = '#blue'
+            style = '--'
+            color = 'blue'
         }
         def weightLabel = edge.weight != null ? " : ${edge.weight}" : ""
-        writer.writeLine("${sanitize(edge.sourceKey)} ${style} ${sanitize(edge.targetKey)} ${color}${weightLabel}")
+        writer.writeLine("${sanitize(edge.sourceKey)} -[${color}]${style}> ${sanitize(edge.targetKey)}${weightLabel}")
     }
     writer.writeLine('')
     writer.writeLine('legend right')
     writer.writeLine('  <color:black>Black</color> = Require-Bundle only')
     writer.writeLine('  <color:blue>Blue</color> = Package wiring only')
     writer.writeLine('  <color:green>Green</color> = Both (redundant)')
-    writer.writeLine('  <color:red>Red dashed</color> = Unresolved Require-Bundle')
+    writer.writeLine('  <color:orange>Orange dashed</color> = Unresolved Require-Bundle')
+    writer.writeLine('  <color:red>Red</color> = Unused (0 type dependencies)')
     writer.writeLine('  <<unresolved>> = bundle not found in scan')
     writer.writeLine('endlegend')
     writer.writeLine('')

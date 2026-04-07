@@ -269,10 +269,11 @@ The diagram uses colored arrows to indicate dependency types:
 * *Black* = Require-Bundle only (normal bundle dependency)
 * *Blue* = Package wiring only (clean OSGi pattern)
 * *Green* = Both (redundant — package imports already covered by Require-Bundle)
-* *Red dashed* = Unresolved Require-Bundle (missing bundle, shown with gray background)
+* *Orange dashed* = Unresolved Require-Bundle (missing bundle, shown with gray background)
+* *Red dotted* = Unused dependency (0 type dependencies — manifest-only, toggleable)
 
 Edge labels show the type dependency count — the number of actual type-level references between the bundles' code.
-A count of 0 (shown as dotted line) means the dependency exists only in the manifest, not in the code.
+A count of 0 (shown as red dotted line) means the dependency exists only in the manifest, not in the code.
 The `java-classpath:ResolveDependsOn` concept is automatically applied as a dependency to ensure cross-bundle type resolution.
 
 The optional `filename`, `filter`, and `groupPattern` properties control the output file name, bundle name filter, and visual grouping respectively.

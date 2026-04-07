@@ -131,6 +131,46 @@
                 <version>${maven-surefire-plugin.version}</version>
             </plugin>
             <plugin>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>prepare-demo</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/demo</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/src/it/demo</directory>
+                                    <filtering>true</filtering>
+                                    <includes>
+                                        <include>.jqassistant.yml</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>prepare-demo-jqassistant</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/demo/jqassistant</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/src/it/demo/jqassistant</directory>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>versions-maven-plugin</artifactId>
                 <version>${maven-versions-plugin.version}</version>

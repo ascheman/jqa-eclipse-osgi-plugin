@@ -1,0 +1,84 @@
+= Demo OSGi Test Environment
+
+A minimal test environment with 6 OSGi bundles for interactive testing of plugin concepts, constraints, and reports.
+
+== Bundles
+
+[options="header"]
+|====
+| Bundle | Version | Role
+| `demo.osgi.app.core` | 1.0.0 | Main app, depends on api+logging+util+external
+| `demo.osgi.app.ui` | 1.0.0 | UI layer, depends on core+api
+| `demo.osgi.api` | 2.0.0 | Public API, no dependencies
+| `demo.osgi.util` | 1.5.0 | Utility library, no dependencies
+| `demo.osgi.logging` | 1.0.0 | Logging facade, imports util (manifest only)
+| `org.external.lib` | - | Unresolved (not in scan)
+|====
+
+== Expected dependency edges
+
+[options="header"]
+|====
+| Source | Target | Type | Weight
+| core | api | Require-Bundle + Package wiring (redundant) | 5
+| core | util | Package wiring only | 2
+| core | logging | Require-Bundle only | 1
+| core | external | Unresolved Require-Bundle | 0
+| ui | core | Require-Bundle + Package wiring (redundant) | 2
+| ui | api | Package wiring only | 3
+| logging | util | Package wiring only (manifest only) | 0
+|====
+
+== Setup
+
+From the project root, install the plugin which also prepares the demo in `target/demo/`:
+
+[source,bash]
+----
+./mvnw install -DskipTests
+----
+
+The `.jqassistant.yml` in `target/demo/` has the plugin version filled in automatically.
+
+== Usage
+
+=== Option 1: Use jQAssistant CLI with embedded store
+
+[source,bash]
+----
+cd target/demo
+
+# Start embedded store and load test data
+jqassistant server &
+
+# Load demo graph via cypher-shell
+cypher-shell -u neo4j -p neo4j < jqassistant/demo-osgi-graph.cypher
+
+# Run concepts and constraints (on the running server)
+jqassistant analyze -Plocal
+
+# Or with re-apply of already applied concepts
+jqassistant analyze -Plocal -Djqassistant.analyze.execute-applied-concepts
+----
+
+=== Option 2: Use external Neo4j
+
+[source,bash]
+----
+cd target/demo
+
+# Load demo graph into running Neo4j
+cypher-shell -u neo4j -p neo4j < jqassistant/demo-osgi-graph.cypher
+
+# Run analysis against external store
+jqassistant analyze -P local
+----
+
+=== Check results
+
+After analysis, check:
+
+* jQAssistant HTML report in `jqassistant/report/`
+* PlantUML diagram in `jqassistant/report/groovy-reports/bundle-dependencies.puml`
+* Interactive HTML graph in `jqassistant/report/groovy-reports/bundle-dependencies.html`
+* Neo4j browser at http://localhost:7474 for direct Cypher queries

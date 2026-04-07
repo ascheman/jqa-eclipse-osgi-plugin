@@ -35,6 +35,11 @@ osgi:Packages:: Import/Export package concepts and package wiring
 eclipse:Default:: Eclipse-specific concepts (PlatformFilter, FrameworkBundle, ApplicationBundle)
 osgi:Constraints:: Validation constraints (unresolved bundles, circular dependencies, missing versions, unsatisfied imports)
 
+== Testing
+
+A demo test environment with 6 bundles covering all dependency types is provided in `src/it/demo/`.
+See xref:src/it/demo/README.adoc[Demo OSGi Test Environment] for setup and usage instructions.
+
 == Requirements
 
 * Java 11+

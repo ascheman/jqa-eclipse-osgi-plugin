@@ -1,0 +1,21 @@
+jqassistant:
+  plugins:
+    - group-id: net.aschemann.jqassistant.plugins
+      artifact-id: jqa-eclipse-osgi-plugin
+      version: @project.version@
+    - group-id: net.aschemann.jqassistant.plugins
+      artifact-id: jqa-groovy-plugin
+      version: 0.2.0-SNAPSHOT
+  analyze:
+    groups:
+      - osgi:Default
+      - osgi:Constraints
+      - osgi:Packages
+      - osgi:Reports
+      - eclipse:Default
+      - demo:Diagrams
+
+"%local":
+  jqassistant:
+    store:
+      uri: bolt://localhost:7687

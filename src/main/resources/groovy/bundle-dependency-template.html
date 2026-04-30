@@ -91,7 +91,7 @@
   </div>
 </div>
 <div id="toolbar" style="padding: 3px 10px; background: #fafafa; border-bottom: 1px solid #eee; font-size: 11px; color: #888;">
-  Click: highlight neighborhood | Shift/Ctrl/Cmd+Click: add to selection | Double-click: focus on neighborhood | Focus: show only selected + neighbors | Esc: clear
+  Click: select bundle (or all in group) | Ctrl/Cmd+Click: toggle in selection | Double-click: focus on neighborhood | Focus: show only selected + neighbors | Esc: clear
 </div>
 <div id="cy"></div>
 <div id="debugPanel"></div>
@@ -401,26 +401,52 @@ var selectedNodes = cy.collection();
 function clearSelection() {
   cy.elements().removeClass('faded').removeClass('selected');
   selectedNodes = cy.collection();
+  trace('state', 'clear-selection', getGraphState());
 }
 
 function highlightSelection() {
   if (selectedNodes.length === 0) { clearSelection(); return; }
+  // First clear all highlight state
+  cy.elements().removeClass('faded').removeClass('selected');
+  // Compute neighborhood of all selected nodes
   var neighborhood = selectedNodes.neighborhood().add(selectedNodes);
+  // Fade everything, then unfade neighborhood
   cy.elements().addClass('faded');
   neighborhood.filter(function(ele) {
-    return ele.isEdge() || nodePassesFilter(ele);
+    if (ele.isEdge()) return true;
+    if (ele.data('nodeClass') === 'group') {
+      // Show group if any child is in neighborhood
+      return ele.children().some(function(c) { return neighborhood.contains(c); });
+    }
+    return nodePassesFilter(ele);
   }).removeClass('faded');
+  // Mark selected nodes
   selectedNodes.addClass('selected');
+}
+
+// Get bundle nodes for a click target (expands group to its children)
+function getBundleNodes(node) {
+  if (node.data('nodeClass') === 'group') {
+    return node.children().filter(function(c) { return c.data('nodeClass') !== 'group'; });
+  }
+  return cy.collection().add(node);
 }
 
 cy.on('tap', 'node', function(evt) {
   saveState();
   var multiSelect = evt.originalEvent.shiftKey || evt.originalEvent.ctrlKey || evt.originalEvent.metaKey;
-  trace('action', 'tap-node', { node: evt.target.id(), multiSelect: multiSelect, selectedBefore: selectedNodes.map(function(n) { return n.id(); }) });
+  var clickedNodes = getBundleNodes(evt.target);
+  trace('action', 'tap-node', { node: evt.target.id(), isGroup: evt.target.data('nodeClass') === 'group', multiSelect: multiSelect, clickedNodes: clickedNodes.map(function(n) { return n.id(); }), selectedBefore: selectedNodes.map(function(n) { return n.id(); }) });
   if (multiSelect) {
-    selectedNodes = selectedNodes.add(evt.target);
+    // Toggle: if all clicked nodes are already selected, deselect them; otherwise add
+    var allSelected = clickedNodes.every(function(n) { return selectedNodes.contains(n); });
+    if (allSelected) {
+      selectedNodes = selectedNodes.subtract(clickedNodes);
+    } else {
+      selectedNodes = selectedNodes.add(clickedNodes);
+    }
   } else {
-    selectedNodes = cy.collection().add(evt.target);
+    selectedNodes = clickedNodes;
   }
   trace('state', 'after-tap', { selected: selectedNodes.map(function(n) { return n.id(); }) });
   highlightSelection();

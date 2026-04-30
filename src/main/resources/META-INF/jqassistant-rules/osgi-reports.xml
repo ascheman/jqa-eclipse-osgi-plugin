@@ -5,6 +5,7 @@
     <group id="osgi:Reports">
         <description>Report concepts for visualizing OSGi bundle dependencies.</description>
         <includeConcept refId="osgi:BundleDependencyGraph"/>
+        <includeConcept refId="osgi:BundleDependencyRuntimeGraph"/>
         <includeConcept refId="osgi:RequireBundleGraph"/>
     </group>
 
@@ -14,6 +15,24 @@
         <description>Returns bundle dependency adjacency pairs (source, target) with dependency types, versions, and type dependency count.</description>
         <cypher><![CDATA[
             MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
+            RETURN DISTINCT source.bundleSymbolicName AS Source,
+                   source.bundleVersion AS SourceVersion,
+                   target.bundleSymbolicName AS Target,
+                   target.bundleVersion AS TargetVersion,
+                   d.viaRequireBundle AS ViaRequireBundle,
+                   d.viaPackageWiring AS ViaPackageWiring,
+                   d.typeDependencyCount AS TypeDependencyCount
+            ORDER BY Source, SourceVersion, Target, TargetVersion
+        ]]></cypher>
+    </concept>
+
+    <!-- Adjacency pairs for runtime bundle dependencies (excluding pure IMPLEMENTS) -->
+    <concept id="osgi:BundleDependencyRuntimeGraph">
+        <requiresConcept refId="osgi:BundleDependencyRuntime"/>
+        <requiresConcept refId="osgi:BundleVersion"/>
+        <description>Returns runtime bundle dependency adjacency pairs, excluding pure Java IMPLEMENTS relationships. Same shape as osgi:BundleDependencyGraph but based on DEPENDS_ON_RUNTIME edges.</description>
+        <cypher><![CDATA[
+            MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON_RUNTIME]->(target:Osgi:Bundle)
             RETURN DISTINCT source.bundleSymbolicName AS Source,
                    source.bundleVersion AS SourceVersion,
                    target.bundleSymbolicName AS Target,

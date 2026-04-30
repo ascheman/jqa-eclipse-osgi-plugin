@@ -6,6 +6,7 @@
         <description>Demo diagram generation for testing.</description>
         <includeConcept refId="demo:BundleDependencyPlantUML"/>
         <includeConcept refId="demo:BundleDependencyHTML"/>
+        <includeConcept refId="demo:BundleDependencyHTMLRuntime"/>
     </group>
 
     <concept id="demo:BundleDependencyPlantUML">
@@ -74,6 +75,42 @@
         ]]></cypher>
         <report type="Groovy">
             <property name="scriptname">groovy/bundle-dependency-html.groovy</property>
+            <property name="groupPattern">demo\.osgi\.(app|api|util|logging)</property>
+        </report>
+    </concept>
+
+    <concept id="demo:BundleDependencyHTMLRuntime">
+        <requiresConcept refId="osgi:BundleDependencyRuntime"/>
+        <description>Generates an interactive HTML graph of runtime bundle dependencies (excluding pure Java IMPLEMENTS relationships).</description>
+        <cypher><![CDATA[
+            CALL {
+                MATCH (s:Osgi:Bundle)-[d:DEPENDS_ON_RUNTIME]->(t:Osgi:Bundle)
+                RETURN DISTINCT s.bundleSymbolicName AS Source,
+                       s.bundleVersion AS SourceVersion,
+                       t.bundleSymbolicName AS Target,
+                       t.bundleVersion AS TargetVersion,
+                       d.viaRequireBundle AS ViaRequireBundle,
+                       d.viaPackageWiring AS ViaPackageWiring,
+                       d.typeDependencyCount AS TypeDependencyCount,
+                       true AS Resolved
+                UNION
+                MATCH (s:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
+                WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
+                RETURN DISTINCT s.bundleSymbolicName AS Source,
+                       s.bundleVersion AS SourceVersion,
+                       rb.symbolicName AS Target,
+                       null AS TargetVersion,
+                       true AS ViaRequireBundle,
+                       false AS ViaPackageWiring,
+                       0 AS TypeDependencyCount,
+                       false AS Resolved
+            }
+            RETURN Source, SourceVersion, Target, TargetVersion, ViaRequireBundle, ViaPackageWiring, TypeDependencyCount, Resolved
+            ORDER BY Source, SourceVersion, Target, TargetVersion
+        ]]></cypher>
+        <report type="Groovy">
+            <property name="scriptname">groovy/bundle-dependency-html.groovy</property>
+            <property name="filename">bundle-dependencies-runtime.html</property>
             <property name="groupPattern">demo\.osgi\.(app|api|util|logging)</property>
         </report>
     </concept>

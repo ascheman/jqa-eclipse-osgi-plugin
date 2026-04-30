@@ -18,6 +18,7 @@
         <includeConcept refId="osgi:RequiredBundleResolution"/>
         <includeConcept refId="osgi:BundleDependency"/>
         <includeConcept refId="osgi:BundleDependencyWeight"/>
+        <includeConcept refId="osgi:BundleDependencyRuntime"/>
     </group>
 
     <!-- Mark JARs with Bundle-SymbolicName as OSGi Bundles -->
@@ -218,6 +219,29 @@
             RETURN source.bundleSymbolicName AS Source, target.bundleSymbolicName AS Target,
                    d.viaRequireBundle AS ViaRequireBundle, d.viaPackageWiring AS ViaPackageWiring,
                    typeCount AS TypeDependencyCount
+            ORDER BY Source, Target
+        ]]></cypher>
+    </concept>
+
+    <!-- Runtime view: bundle dependencies excluding pure Java IMPLEMENTS relationships -->
+    <concept id="osgi:BundleDependencyRuntime">
+        <requiresConcept refId="osgi:BundleDependency"/>
+        <requiresConcept refId="java-classpath:ResolveDependsOn"/>
+        <description>Creates DEPENDS_ON_RUNTIME relationships between bundles based on type dependencies that are NOT just Java IMPLEMENTS edges. This provides a runtime-focused view that excludes pure interface-implementation relationships. Bundle dependencies that exist only via IMPLEMENTS are not represented in this view.</description>
+        <cypher><![CDATA[
+            MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
+            OPTIONAL MATCH (source)-[:CONTAINS*1..2]->(st:Type)-[:DEPENDS_ON]->(tt:Type)<-[:CONTAINS*1..2]-(target)
+            WHERE st IS NULL OR NOT (st)-[:IMPLEMENTS]->(tt)
+            WITH source, target, d, count(DISTINCT tt) AS runtimeTypeCount
+            // Keep edge if there is any non-IMPLEMENTS type dependency, or if the bundle dep is via Require-Bundle (manifest-only deps remain)
+            WHERE runtimeTypeCount > 0 OR d.viaRequireBundle = true
+            MERGE (source)-[r:DEPENDS_ON_RUNTIME]->(target)
+            SET r.viaRequireBundle = d.viaRequireBundle,
+                r.viaPackageWiring = d.viaPackageWiring,
+                r.typeDependencyCount = runtimeTypeCount
+            RETURN source.bundleSymbolicName AS Source, target.bundleSymbolicName AS Target,
+                   r.viaRequireBundle AS ViaRequireBundle, r.viaPackageWiring AS ViaPackageWiring,
+                   runtimeTypeCount AS TypeDependencyCount
             ORDER BY Source, Target
         ]]></cypher>
     </concept>

@@ -235,6 +235,11 @@ osgi:BundleDependencyGraph::
 Returns bundle dependency adjacency pairs with source/target versions and dependency types (`viaRequireBundle`, `viaPackageWiring`).
 This concept requires `osgi:BundleDependency` from the `osgi:Default` group.
 
+osgi:BundleDependencyRuntimeGraph::
+Same as `osgi:BundleDependencyGraph` but based on `DEPENDS_ON_RUNTIME` edges, which exclude pure Java `IMPLEMENTS` relationships.
+Provides a runtime-focused view of bundle dependencies, hiding pure interface-implementation links.
+Manifest-only dependencies (Require-Bundle without code usage) are still included.
+
 osgi:RequireBundleGraph::
 Returns Require-Bundle adjacency pairs with version ranges, optional flag, and resolution status.
 Includes both resolved and unresolved entries.

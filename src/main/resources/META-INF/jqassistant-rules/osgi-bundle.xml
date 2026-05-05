@@ -3,8 +3,12 @@
                    xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
 
     <group id="osgi:Default">
-        <description>Core OSGi bundle concepts: identifies bundles, extracts metadata (version, name, vendor, activator, activation policy, execution environment), resolves fragments and Require-Bundle dependencies.</description>
+        <description>Core OSGi bundle concepts: identifies bundles, extracts metadata (version, name, vendor, activator,
+            activation policy, execution environment, manifest version), resolves fragments and Require-Bundle
+            dependencies.
+        </description>
         <includeConcept refId="osgi:Bundle"/>
+        <includeConcept refId="osgi:ManifestVersion"/>
         <includeConcept refId="osgi:BundleVersion"/>
         <includeConcept refId="osgi:BundleName"/>
         <includeConcept refId="osgi:BundleVendor"/>
@@ -23,7 +27,9 @@
 
     <!-- Mark JARs with Bundle-SymbolicName as OSGi Bundles -->
     <concept id="osgi:Bundle">
-        <description>Labels JAR archives containing a Bundle-SymbolicName manifest header as :Osgi:Bundle and sets the bundleSymbolicName property.</description>
+        <description>Labels JAR archives containing a Bundle-SymbolicName manifest header as :Osgi:Bundle and sets the
+            bundleSymbolicName property.
+        </description>
         <cypher><![CDATA[
             MATCH (jar:Jar:Archive)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -38,10 +44,26 @@
         ]]></cypher>
     </concept>
 
+    <!-- Extract Manifest-Version -->
+    <concept id="osgi:ManifestVersion">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Sets the manifestVersion property on OSGi bundles from the Manifest-Version manifest header
+            (typically "1.0" or "2.0").
+        </description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
+                  -[:DECLARES]->(ms:ManifestSection {name: "Main"})
+                  -[:HAS]->(entry:ManifestEntry {name: "Manifest-Version"})
+            SET bundle.manifestVersion = trim(entry.value)
+            RETURN bundle.bundleSymbolicName AS BundleSymbolicName, bundle.manifestVersion AS ManifestVersion
+        ]]></cypher>
+    </concept>
+
     <!-- Extract Bundle-Version -->
     <concept id="osgi:BundleVersion">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Sets the bundleVersion property on OSGi bundles from the Bundle-Version manifest header.</description>
+        <description>Sets the bundleVersion property on OSGi bundles from the Bundle-Version manifest header.
+        </description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -67,7 +89,8 @@
     <!-- Extract Bundle-Vendor -->
     <concept id="osgi:BundleVendor">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Sets the bundleVendor property on OSGi bundles from the Bundle-Vendor manifest header.</description>
+        <description>Sets the bundleVendor property on OSGi bundles from the Bundle-Vendor manifest header.
+        </description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -80,7 +103,9 @@
     <!-- Detect singleton bundles -->
     <concept id="osgi:SingletonBundle">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Sets the singleton property to true on OSGi bundles declared as singleton in the Bundle-SymbolicName header.</description>
+        <description>Sets the singleton property to true on OSGi bundles declared as singleton in the
+            Bundle-SymbolicName header.
+        </description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -94,7 +119,9 @@
     <!-- Extract Bundle-Activator class reference -->
     <concept id="osgi:BundleActivator">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Sets the bundleActivator property and creates a relationship from the bundle to its activator class.</description>
+        <description>Sets the bundleActivator property and creates a relationship from the bundle to its activator
+            class.
+        </description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -120,7 +147,9 @@
     <!-- Extract Bundle-RequiredExecutionEnvironment -->
     <concept id="osgi:ExecutionEnvironment">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Sets the requiredExecutionEnvironment property from the Bundle-RequiredExecutionEnvironment manifest header.</description>
+        <description>Sets the requiredExecutionEnvironment property from the Bundle-RequiredExecutionEnvironment
+            manifest header.
+        </description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -133,7 +162,9 @@
     <!-- Identify fragment bundles -->
     <concept id="osgi:Fragment">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Labels bundles with a Fragment-Host header as :Osgi:Fragment and extracts the host bundle symbolic name.</description>
+        <description>Labels bundles with a Fragment-Host header as :Osgi:Fragment and extracts the host bundle symbolic
+            name.
+        </description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(mf:Manifest:File)
                   -[:DECLARES]->(ms:ManifestSection {name: "Main"})
@@ -153,7 +184,9 @@
     <!-- Resolve fragment-to-host relationships -->
     <concept id="osgi:FragmentResolvesToHost">
         <requiresConcept refId="osgi:Fragment"/>
-        <description>Creates FRAGMENT_OF relationships from fragment bundles to their host bundles (when the host exists in the graph).</description>
+        <description>Creates FRAGMENT_OF relationships from fragment bundles to their host bundles (when the host exists
+            in the graph).
+        </description>
         <cypher><![CDATA[
             MATCH (fragment:Osgi:Fragment), (host:Osgi:Bundle)
             WHERE fragment.fragmentHostSymbolicName = host.bundleSymbolicName
@@ -166,7 +199,9 @@
     <!-- Parse Require-Bundle headers into relationships (Java-based for proper quote-aware parsing) -->
     <concept id="osgi:RequiresBundle">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Parses the Require-Bundle manifest header and creates REQUIRES_BUNDLE relationships between bundles (as intermediate nodes with symbolicName and versionRange).</description>
+        <description>Parses the Require-Bundle manifest header and creates REQUIRES_BUNDLE relationships between bundles
+            (as intermediate nodes with symbolicName and versionRange).
+        </description>
         <source language="osgi"><![CDATA[parseRequireBundle]]></source>
     </concept>
 
@@ -175,7 +210,10 @@
         <requiresConcept refId="osgi:BundleVersion"/>
         <requiresConcept refId="osgi:RequiredBundleResolution"/>
         <requiresConcept refId="osgi:PackageWiring"/>
-        <description>Creates DEPENDS_ON relationships between bundles based on Require-Bundle resolution and Import/Export package wiring. Properties viaRequireBundle and viaPackageWiring indicate the dependency source.</description>
+        <description>Creates DEPENDS_ON relationships between bundles based on Require-Bundle resolution and
+            Import/Export package wiring. Properties viaRequireBundle and viaPackageWiring indicate the dependency
+            source.
+        </description>
         <cypher><![CDATA[
             // Collect all dependency pairs by symbolic name
             OPTIONAL MATCH (s1:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(t1:Osgi:Bundle)
@@ -210,7 +248,9 @@
     <concept id="osgi:BundleDependencyWeight">
         <requiresConcept refId="osgi:BundleDependency"/>
         <requiresConcept refId="java-classpath:ResolveDependsOn"/>
-        <description>Counts actual type-level dependencies between bundles and stores them on the DEPENDS_ON relationship. A typeDependencyCount of 0 means the dependency exists only in the manifest, not in the code.</description>
+        <description>Counts actual type-level dependencies between bundles and stores them on the DEPENDS_ON
+            relationship. A typeDependencyCount of 0 means the dependency exists only in the manifest, not in the code.
+        </description>
         <cypher><![CDATA[
             MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
             OPTIONAL MATCH (source)-[:CONTAINS*1..2]->(st:Type)-[:DEPENDS_ON]->(tt:Type)<-[:CONTAINS*1..2]-(target)
@@ -227,7 +267,10 @@
     <concept id="osgi:BundleDependencyRuntime">
         <requiresConcept refId="osgi:BundleDependency"/>
         <requiresConcept refId="java-classpath:ResolveDependsOn"/>
-        <description>Creates DEPENDS_ON_RUNTIME relationships between bundles based on type dependencies that are NOT just Java IMPLEMENTS edges. This provides a runtime-focused view that excludes pure interface-implementation relationships. Bundle dependencies that exist only via IMPLEMENTS are not represented in this view.</description>
+        <description>Creates DEPENDS_ON_RUNTIME relationships between bundles based on type dependencies that are NOT
+            just Java IMPLEMENTS edges. This provides a runtime-focused view that excludes pure interface-implementation
+            relationships. Bundle dependencies that exist only via IMPLEMENTS are not represented in this view.
+        </description>
         <cypher><![CDATA[
             MATCH (source:Osgi:Bundle)-[d:DEPENDS_ON]->(target:Osgi:Bundle)
             OPTIONAL MATCH (source)-[:CONTAINS*1..2]->(st:Type)-[:DEPENDS_ON]->(tt:Type)<-[:CONTAINS*1..2]-(target)
@@ -249,7 +292,9 @@
     <!-- Resolve Require-Bundle to actual bundles -->
     <concept id="osgi:RequiredBundleResolution">
         <requiresConcept refId="osgi:RequiresBundle"/>
-        <description>Creates RESOLVES_TO relationships from RequiredBundle nodes to the actual Bundle they refer to (when present in the graph).</description>
+        <description>Creates RESOLVES_TO relationships from RequiredBundle nodes to the actual Bundle they refer to
+            (when present in the graph).
+        </description>
         <cypher><![CDATA[
             MATCH (rb:Osgi:RequiredBundle), (target:Osgi:Bundle)
             WHERE rb.symbolicName = target.bundleSymbolicName

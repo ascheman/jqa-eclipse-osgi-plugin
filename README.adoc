@@ -35,6 +35,78 @@ osgi:Packages:: Import/Export package concepts and package wiring
 eclipse:Default:: Eclipse-specific concepts (PlatformFilter, FrameworkBundle, ApplicationBundle)
 osgi:Constraints:: Validation constraints (unresolved bundles, circular dependencies, missing versions, unsatisfied imports)
 
+== Using in a Maven Project
+
+The concepts in this plugin depend on `:Manifest:File` and `:ManifestEntry` nodes that jQAssistant creates when it scans a JAR archive.
+By default, the jQAssistant Maven plugin does _not_ open the project's own packaged JAR -- it only scans `target/classes/`.
+That suffices for class- and dependency-level analysis, but leaves `META-INF/MANIFEST.MF` (and with it every OSGi header) outside the graph.
+
+This is generic jQAssistant Maven plugin behavior -- it affects vanilla `jar`-packaging projects as well.
+Tycho's `eclipse-plugin` packaging makes the gap more visible because the resolved main-artifact path carries an `.eclipse-plugin` extension that does not exist on disk, but the underlying cause is the same.
+
+=== Workaround: Include the Built JAR Explicitly
+
+Configure the jQAssistant Maven plugin to add `target/$\{project.build.finalName}.jar` to its scan includes.
+Maven's per-module property interpolation gives each module the correct file name, and missing files (e.g., for parent POMs that do not produce a JAR) are silently skipped.
+
+[source,xml]
+----
+<plugin>
+  <groupId>com.buschmais.jqassistant</groupId>
+  <artifactId>jqassistant-maven-plugin</artifactId>
+  <version>2.9.1</version>
+  <configuration>
+    <yaml>
+jqassistant:
+  scan:
+    include:
+      files:
+        - "java:classpath::target/${project.build.finalName}.jar"
+    </yaml>
+  </configuration>
+  <executions>
+    <execution>
+      <id>scan</id>
+      <goals><goal>scan</goal></goals>
+    </execution>
+    <execution>
+      <id>analyze</id>
+      <goals><goal>analyze</goal></goals>
+    </execution>
+  </executions>
+</plugin>
+----
+
+The configuration sits at plugin level so it applies to both phase-bound executions (e.g., `mvn install`) and direct CLI invocations (`mvn jqassistant:scan`).
+After this change, each module's built JAR is opened by the Java archive scanner, `META-INF/MANIFEST.MF` is parsed into `:Manifest:File` and `:ManifestEntry` nodes, and the OSGi concepts in this plugin can match.
+
+=== Multi-Module Tycho Reactors
+
+For multi-module Tycho-managed reactors, also place the following in a `.jqassistant.yml` at the reactor root:
+
+[source,yaml]
+----
+jqassistant:
+  maven:
+    # All modules share one store under the reactor execution root.
+    use-execution-root-as-project-root: true
+    # Tycho resets the plugin classloader per module, which loses the
+    # CachingStoreProvider's singleton state and triggers stale-lock
+    # collisions on the next module. Closing and reopening the store
+    # per module sidesteps this.
+    reuse-store: false
+  scan:
+    # Don't reset on every module -- reset manually with
+    # `mvn jqassistant:reset` when needed.
+    reset: false
+----
+
+[CAUTION]
+====
+jQAssistant's `.jqassistant.yml` file is loaded at config ordinal 100, while Maven `-D` system properties are exposed at ordinal 90.
+Anything set in `.jqassistant.yml` therefore *cannot* be overridden from the Maven command line -- to flip a value temporarily, edit the file.
+====
+
 == Testing
 
 A demo test environment with 6 bundles covering all dependency types is provided in `src/it/demo/`.

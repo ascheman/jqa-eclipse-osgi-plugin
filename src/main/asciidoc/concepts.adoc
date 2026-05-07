@@ -192,6 +192,55 @@ Bundles that declare an https://help.eclipse.org/latest/topic/org.eclipse.platfo
 | bundleLocalization  | The localization base name from https://docs.osgi.org/specification/osgi.core/8.0.0/framework.module.html#framework.module.localization[`Bundle-Localization`]
 |====
 
+[[:Eclipse:ExtensionPoint]]
+==== Nodes labeled with `:Eclipse:ExtensionPoint`
+
+XML elements `<extension-point>` inside a bundle's `plugin.xml`, labeled in addition to `:Xml:Element`.
+
+.Properties of `:Eclipse:ExtensionPoint`
+[options="header"]
+|====
+| Name                | Description
+| extensionPointId    | Value of the `id` attribute (e.g., `myplugin.myExtPoint`)
+| extensionPointName  | Value of the `name` attribute
+| schema              | Value of the `schema` attribute (path to .exsd file)
+|====
+
+.Relations from `:Osgi:Bundle` to `:Eclipse:ExtensionPoint`
+[options="header"]
+|====
+| Name                     | Target label(s)            | Cardinality | Description
+| DEFINES_EXTENSION_POINT  | <<:Eclipse:ExtensionPoint>>  | 0..n        | Declares an Eclipse extension point in plugin.xml
+|====
+
+[[:Eclipse:Extension]]
+==== Nodes labeled with `:Eclipse:Extension`
+
+XML elements `<extension>` inside a bundle's `plugin.xml`, labeled in addition to `:Xml:Element`.
+
+.Properties of `:Eclipse:Extension`
+[options="header"]
+|====
+| Name            | Description
+| point           | Value of the `point` attribute (the referenced extension point id)
+| extensionId     | Value of the `id` attribute (when present)
+| extensionName   | Value of the `name` attribute (when present)
+|====
+
+.Relations from `:Osgi:Bundle` to `:Eclipse:Extension`
+[options="header"]
+|====
+| Name                | Target label(s)         | Cardinality | Description
+| DECLARES_EXTENSION  | <<:Eclipse:Extension>>  | 0..n        | Declares an Eclipse extension in plugin.xml
+|====
+
+.Relations from `:Eclipse:Extension` to `:Type`
+[options="header"]
+|====
+| Name            | Target label(s) | Cardinality | Description
+| IMPLEMENTED_BY  | `:Type`         | 0..n        | Resolved Java types referenced by `class` attributes inside the extension's child elements
+|====
+
 == OSGi Constraints
 
 [[osgi:Constraints]]

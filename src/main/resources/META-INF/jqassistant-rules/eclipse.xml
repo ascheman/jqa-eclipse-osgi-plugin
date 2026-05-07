@@ -3,11 +3,14 @@
                    xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
 
     <group id="eclipse:Default">
-        <description>Eclipse RCP-specific concepts: classifies bundles as framework or application bundles, extracts platform filter (OS/architecture) and localization properties.</description>
+        <description>Eclipse RCP-specific concepts: classifies bundles as framework or application bundles, extracts platform filter (OS/architecture) and localization properties, parses plugin.xml extension points and extensions.</description>
         <includeConcept refId="eclipse:PlatformFilter"/>
         <includeConcept refId="eclipse:BundleLocalization"/>
         <includeConcept refId="eclipse:EclipseBundle"/>
         <includeConcept refId="eclipse:ApplicationBundle"/>
+        <includeConcept refId="eclipse:ExtensionPoint"/>
+        <includeConcept refId="eclipse:Extension"/>
+        <includeConcept refId="eclipse:ExtensionImplementation"/>
     </group>
 
     <!-- Extract Eclipse-PlatformFilter -->
@@ -71,6 +74,72 @@
             WHERE NOT bundle:Eclipse:FrameworkBundle
             SET bundle:Eclipse:ApplicationBundle
             RETURN bundle.bundleSymbolicName AS ApplicationBundle
+        ]]></cypher>
+    </concept>
+
+    <!-- Parse <extension-point> elements from plugin.xml -->
+    <concept id="eclipse:ExtensionPoint">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Labels XML elements named "extension-point" inside a bundle's plugin.xml as :Eclipse:ExtensionPoint and creates DEFINES_EXTENSION_POINT relationships from the bundle. Extracts id, name, and schema attributes onto the node.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(doc:Xml:Document)
+            WHERE doc.fileName ENDS WITH '/plugin.xml'
+            MATCH (doc)-[:HAS_ROOT_ELEMENT]->(root:Xml:Element {name: 'plugin'})
+            MATCH (root)-[:HAS_ELEMENT]->(ep:Xml:Element {name: 'extension-point'})
+            OPTIONAL MATCH (ep)-[:HAS_ATTRIBUTE]->(idAttr:Xml:Attribute {name: 'id'})
+            OPTIONAL MATCH (ep)-[:HAS_ATTRIBUTE]->(nameAttr:Xml:Attribute {name: 'name'})
+            OPTIONAL MATCH (ep)-[:HAS_ATTRIBUTE]->(schemaAttr:Xml:Attribute {name: 'schema'})
+            SET ep:Eclipse:ExtensionPoint,
+                ep.extensionPointId = idAttr.value,
+                ep.extensionPointName = nameAttr.value,
+                ep.schema = schemaAttr.value
+            MERGE (bundle)-[:DEFINES_EXTENSION_POINT]->(ep)
+            RETURN bundle.bundleSymbolicName AS Bundle,
+                   ep.extensionPointId AS Id,
+                   ep.extensionPointName AS Name,
+                   ep.schema AS Schema
+            ORDER BY Bundle, Id
+        ]]></cypher>
+    </concept>
+
+    <!-- Parse <extension> elements from plugin.xml -->
+    <concept id="eclipse:Extension">
+        <requiresConcept refId="osgi:Bundle"/>
+        <description>Labels XML elements named "extension" inside a bundle's plugin.xml as :Eclipse:Extension and creates DECLARES_EXTENSION relationships from the bundle. Extracts point (referenced extension point id), id, and name attributes onto the node.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(doc:Xml:Document)
+            WHERE doc.fileName ENDS WITH '/plugin.xml'
+            MATCH (doc)-[:HAS_ROOT_ELEMENT]->(root:Xml:Element {name: 'plugin'})
+            MATCH (root)-[:HAS_ELEMENT]->(ext:Xml:Element {name: 'extension'})
+            OPTIONAL MATCH (ext)-[:HAS_ATTRIBUTE]->(pointAttr:Xml:Attribute {name: 'point'})
+            OPTIONAL MATCH (ext)-[:HAS_ATTRIBUTE]->(idAttr:Xml:Attribute {name: 'id'})
+            OPTIONAL MATCH (ext)-[:HAS_ATTRIBUTE]->(nameAttr:Xml:Attribute {name: 'name'})
+            SET ext:Eclipse:Extension,
+                ext.point = pointAttr.value,
+                ext.extensionId = idAttr.value,
+                ext.extensionName = nameAttr.value
+            MERGE (bundle)-[:DECLARES_EXTENSION]->(ext)
+            RETURN bundle.bundleSymbolicName AS Bundle,
+                   ext.point AS Point,
+                   ext.extensionId AS Id,
+                   ext.extensionName AS Name
+            ORDER BY Bundle, Point, Id
+        ]]></cypher>
+    </concept>
+
+    <!-- Link extensions to implementing Java classes (via class attributes in extension children) -->
+    <concept id="eclipse:ExtensionImplementation">
+        <requiresConcept refId="eclipse:Extension"/>
+        <description>For each :Eclipse:Extension, scans descendant elements for a "class" attribute and creates IMPLEMENTED_BY relationships to the matching :Type node (when present in the graph). Common usage: extension contributions like &lt;view class="com.example.MyView"/&gt;.</description>
+        <cypher><![CDATA[
+            MATCH (ext:Eclipse:Extension)-[:HAS_ELEMENT*1..5]->(child:Xml:Element)
+                  -[:HAS_ATTRIBUTE]->(classAttr:Xml:Attribute {name: 'class'})
+            WITH ext, classAttr.value AS className
+            WHERE className IS NOT NULL AND className =~ '^[a-zA-Z_$][a-zA-Z0-9_$.]*$'
+            MATCH (type:Type) WHERE type.fqn = className
+            MERGE (ext)-[:IMPLEMENTED_BY]->(type)
+            RETURN DISTINCT ext.point AS Point, ext.extensionId AS ExtensionId, type.fqn AS Implementation
+            ORDER BY Point, ExtensionId, Implementation
         ]]></cypher>
     </concept>
 

@@ -266,6 +266,22 @@
                     <name>env.GITHUB_TOKEN</name>
                 </property>
             </activation>
+            <repositories>
+                <!--
+                  jqa-template-report-plugin SNAPSHOTs are published here. Drop
+                  the dependency entirely once the plugin reaches a public
+                  release repository (Maven Central). Auth is via the same
+                  GITHUB_TOKEN that activates this profile, supplied through
+                  ~/.m2/settings.xml or actions/setup-java's server-id wiring.
+                -->
+                <repository>
+                    <id>github-jqa-template-report</id>
+                    <name>GitHub Packages: ascheman/jqa-template-report-plugin</name>
+                    <url>https://maven.pkg.github.com/ascheman/jqa-template-report-plugin</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>true</enabled></snapshots>
+                </repository>
+            </repositories>
             <distributionManagement>
                 <snapshotRepository>
                     <id>github</id>

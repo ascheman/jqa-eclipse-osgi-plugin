@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   build:
@@ -21,9 +22,16 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
+          # Wires ~/.m2/settings.xml with a <server> block matching the
+          # github-jqa-template-report repository id from pom.xml. The default
+          # env-var names (GITHUB_ACTOR / GITHUB_TOKEN) are auto-provided by
+          # GitHub Actions, so no extra secrets are needed.
+          server-id: github-jqa-template-report
 
       - name: Build and test
-        run: ./mvnw verify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./mvnw --batch-mode --no-transfer-progress verify
 
       - name: Publish test results
         uses: dorny/test-reporter@df6247429542221bc30d46a036ee47af1102c451 # v2

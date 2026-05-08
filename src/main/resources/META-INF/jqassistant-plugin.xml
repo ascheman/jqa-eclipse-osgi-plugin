@@ -10,6 +10,7 @@
         <resource>eclipse.xml</resource>
         <resource>osgi-constraints.xml</resource>
         <resource>osgi-reports.xml</resource>
+        <resource>eclipse-reports.xml</resource>
     </rules>
     <ruleInterpreter>
         <class>net.aschemann.jqassistant.plugins.eclipse.osgi.impl.OsgiRuleInterpreterPlugin</class>

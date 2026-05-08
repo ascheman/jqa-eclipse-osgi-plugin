@@ -52,6 +52,7 @@
 
         <assertj-core.version>3.27.7</assertj-core.version>
         <jqa.version>2.9.1</jqa.version>
+        <jqa-template-report-plugin.version>0.1.0-SNAPSHOT</jqa-template-report-plugin.version>
         <junit-jupiter.version>5.14.3</junit-jupiter.version>
         <maven-dependency-plugin.version>3.10.0</maven-dependency-plugin.version>
         <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
@@ -110,6 +111,16 @@
                             <failOnWarning>true</failOnWarning>
                             <ignoreNonCompile>false</ignoreNonCompile>
                             <verbose>true</verbose>
+                            <ignoredUnusedDeclaredDependencies>
+                                <!--
+                                  Pulled in (runtime scope) so jQA's plugin loader discovers
+                                  the template-report plugin transitively from this plugin's
+                                  declaration. No Java class here references any
+                                  TemplateReportPlugin type, so the analyzer cannot see the
+                                  relationship even though the dep is genuinely needed.
+                                -->
+                                <ignoredUnusedDeclaredDependency>net.aschemann.jqassistant.plugins:jqa-template-report-plugin</ignoredUnusedDeclaredDependency>
+                            </ignoredUnusedDeclaredDependencies>
                         </configuration>
                     </execution>
                 </executions>
@@ -219,6 +230,12 @@
             <groupId>com.buschmais.xo</groupId>
             <artifactId>xo.api</artifactId>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.aschemann.jqassistant.plugins</groupId>
+            <artifactId>jqa-template-report-plugin</artifactId>
+            <version>${jqa-template-report-plugin.version}</version>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>

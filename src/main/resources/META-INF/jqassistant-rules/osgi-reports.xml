@@ -3,10 +3,20 @@
                    xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
 
     <group id="osgi:Reports">
-        <description>Report concepts for visualizing OSGi bundle dependencies.</description>
+        <description>Report concepts for visualizing OSGi bundle dependencies and per-bundle AsciiDoc fragments.</description>
         <includeConcept refId="osgi:BundleDependencyGraph"/>
         <includeConcept refId="osgi:BundleDependencyRuntimeGraph"/>
         <includeConcept refId="osgi:RequireBundleGraph"/>
+        <!-- Per-bundle AsciiDoc fragments rendered via the template-report plugin. -->
+        <includeConcept refId="osgi:BundleMetadataReport"/>
+        <includeConcept refId="osgi:ManifestDetailsReport"/>
+        <includeConcept refId="osgi:RequiredBundlesReport"/>
+        <includeConcept refId="osgi:ImportedPackagesReport"/>
+        <includeConcept refId="osgi:ExportedPackagesReport"/>
+        <includeConcept refId="osgi:DomainClassesReport"/>
+        <includeConcept refId="osgi:EnumerationsReport"/>
+        <includeConcept refId="osgi:ConfigFilesReport"/>
+        <includeConcept refId="osgi:SourceStructureReport"/>
     </group>
 
     <!-- Adjacency pairs for bundle dependencies -->
@@ -42,6 +52,166 @@
                    d.typeDependencyCount AS TypeDependencyCount
             ORDER BY Source, SourceVersion, Target, TargetVersion
         ]]></cypher>
+    </concept>
+
+    <!-- Bundle metadata for AsciiDoc rendering via the FreeMarker template-report plugin. -->
+    <concept id="osgi:BundleMetadataReport">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:BundleVersion"/>
+        <requiresConcept refId="osgi:BundleName"/>
+        <requiresConcept refId="osgi:BundleVendor"/>
+        <requiresConcept refId="osgi:BundleActivator"/>
+        <description>Bundle metadata (Symbolic Name, Version, Name, Vendor, Activator) rendered to AsciiDoc via the templates/osgi-BundleMetadataReport.adoc.ftl template.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)
+            RETURN b.bundleSymbolicName AS SymbolicName,
+                   b.bundleVersion AS Version,
+                   b.bundleName AS Name,
+                   b.bundleVendor AS Vendor,
+                   b.bundleActivator AS Activator
+            ORDER BY SymbolicName
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!--
+       =================================================================
+       Per-bundle AsciiDoc report concepts.
+       Each concept queries one row per bundle (or per (bundle, item)) and
+       sets primaryColumn="SymbolicName" so the template-report plugin
+       splits output into <reportDir>/asciidoc/<bundle>/<rule>.adoc files.
+       Templates live under src/main/resources/templates/<rule-id>.adoc.ftl.
+       =================================================================
+    -->
+
+    <!-- Manifest Details: every Main-section header for the bundle. -->
+    <concept id="osgi:ManifestDetailsReport">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>All Main-section MANIFEST.MF headers per bundle, rendered as a key/value AsciiDoc table.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:CONTAINS]->(:Manifest:File)
+                  -[:DECLARES]->(:ManifestSection {name: "Main"})
+                  -[:HAS]->(e:ManifestEntry)
+            RETURN DISTINCT b.bundleSymbolicName AS SymbolicName,
+                   e.name              AS HeaderName,
+                   e.value             AS HeaderValue
+            ORDER BY SymbolicName, HeaderName
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Required Bundles: Require-Bundle entries (resolved + unresolved). -->
+    <concept id="osgi:RequiredBundlesReport">
+        <requiresConcept refId="osgi:RequiresBundle"/>
+        <requiresConcept refId="osgi:RequiredBundleResolution"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Require-Bundle entries per bundle with target version range, optional flag and resolution status.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
+            OPTIONAL MATCH (rb)-[:RESOLVES_TO]->(target:Osgi:Bundle)
+            RETURN DISTINCT b.bundleSymbolicName       AS SymbolicName,
+                   rb.symbolicName                    AS RequiredBundle,
+                   coalesce(rb.versionRange, '')      AS VersionRange,
+                   coalesce(rb.optional, false)       AS Optional,
+                   target IS NOT NULL                 AS Resolved
+            ORDER BY SymbolicName, RequiredBundle
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Imported Packages: Import-Package entries with resolution status. -->
+    <concept id="osgi:ImportedPackagesReport">
+        <requiresConcept refId="osgi:ImportedPackage"/>
+        <requiresConcept refId="osgi:PackageWiring"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Import-Package entries per bundle with version, optional flag, and whether some bundle exports a matching package.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
+            OPTIONAL MATCH (ep:Osgi:ExportedPackage)-[:SATISFIES]->(ip)
+            WITH b.bundleSymbolicName AS SymbolicName, ip, count(ep) > 0 AS Resolved
+            RETURN DISTINCT SymbolicName,
+                   ip.fqn                            AS Package,
+                   coalesce(ip.version, '')          AS Version,
+                   coalesce(ip.optional, false)      AS Optional,
+                   Resolved
+            ORDER BY SymbolicName, Package
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Exported Packages: Export-Package entries. -->
+    <concept id="osgi:ExportedPackagesReport">
+        <requiresConcept refId="osgi:ExportedPackage"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Export-Package entries per bundle.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:EXPORTS_PACKAGE]->(ep:Osgi:ExportedPackage)
+            RETURN DISTINCT b.bundleSymbolicName      AS SymbolicName,
+                   ep.fqn                            AS Package,
+                   coalesce(ep.version, '')          AS Version
+            ORDER BY SymbolicName, Package
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Domain Classes: top-level Java classes contained in the bundle (no inner / anonymous). -->
+    <concept id="osgi:DomainClassesReport">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Top-level Java classes contained in the bundle (excluding inner and anonymous classes).</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:CONTAINS*1..3]->(c)
+            WHERE c:Class AND c:Java AND NOT c.fqn CONTAINS '$'
+            RETURN DISTINCT b.bundleSymbolicName  AS SymbolicName,
+                            c.fqn                 AS ClassName
+            ORDER BY SymbolicName, ClassName
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Enumerations: Java enum types in the bundle. -->
+    <concept id="osgi:EnumerationsReport">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Java enum types contained in the bundle.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:CONTAINS*1..3]->(e)
+            WHERE e:Enum AND e:Java
+            RETURN DISTINCT b.bundleSymbolicName  AS SymbolicName,
+                            e.fqn                 AS EnumName
+            ORDER BY SymbolicName, EnumName
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Configuration Files: .properties files inside the bundle. -->
+    <concept id="osgi:ConfigFilesReport">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Configuration files (.properties) shipped inside the bundle.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:CONTAINS*1..5]->(p:Properties:File)
+            RETURN DISTINCT b.bundleSymbolicName  AS SymbolicName,
+                            p.fileName            AS FilePath
+            ORDER BY SymbolicName, FilePath
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Source Structure: Java packages contained in the bundle, ordered as a flat list (deepest first via package name length). -->
+    <concept id="osgi:SourceStructureReport">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Java packages contained in the bundle as a flat list (used as a basis for source-structure documentation).</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:CONTAINS*1..5]->(p:Java:Package)
+            WHERE p.fqn IS NOT NULL AND p.fqn <> ''
+            RETURN DISTINCT b.bundleSymbolicName  AS SymbolicName,
+                            p.fqn                 AS Package
+            ORDER BY SymbolicName, Package
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
     </concept>
 
     <!-- Adjacency pairs for Require-Bundle dependencies -->

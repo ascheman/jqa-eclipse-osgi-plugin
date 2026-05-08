@@ -1,0 +1,46 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <group id="eclipse:Reports">
+        <description>Eclipse RCP-specific report concepts (per-bundle AsciiDoc fragments for plugin.xml extension points and extensions).</description>
+        <includeConcept refId="eclipse:ExtensionPointsReport"/>
+        <includeConcept refId="eclipse:ExtensionsReport"/>
+    </group>
+
+    <!-- Extension Points: <extension-point> entries declared in plugin.xml. -->
+    <concept id="eclipse:ExtensionPointsReport">
+        <requiresConcept refId="eclipse:ExtensionPoint"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Eclipse extension points declared by the bundle's plugin.xml.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:DEFINES_EXTENSION_POINT]->(ep:Eclipse:ExtensionPoint)
+            RETURN b.bundleSymbolicName                AS SymbolicName,
+                   ep.extensionPointId                 AS ExtensionPointId,
+                   coalesce(ep.extensionPointName, '') AS Name,
+                   coalesce(ep.schema, '')             AS Schema
+            ORDER BY SymbolicName, ExtensionPointId
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <!-- Extensions: <extension> contributions and (where known) the implementing Java type. -->
+    <concept id="eclipse:ExtensionsReport">
+        <requiresConcept refId="eclipse:Extension"/>
+        <requiresConcept refId="eclipse:ExtensionImplementation"/>
+        <requiresConcept refId="osgi:BundleMetadataReport"/>
+        <description>Eclipse extensions contributed by the bundle, with the referenced extension point and any implementing Java class found in the graph.</description>
+        <cypher><![CDATA[
+            MATCH (b:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+            OPTIONAL MATCH (ext)-[:IMPLEMENTED_BY]->(impl)
+            RETURN b.bundleSymbolicName            AS SymbolicName,
+                   ext.point                       AS Point,
+                   coalesce(ext.extensionId, '')   AS ExtensionId,
+                   coalesce(ext.extensionName, '') AS Name,
+                   coalesce(impl.fqn, '')          AS Implementation
+            ORDER BY SymbolicName, Point, ExtensionId
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+</jqassistant-rules>

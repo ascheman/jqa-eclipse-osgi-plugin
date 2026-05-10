@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.2"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.2 http://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <!--
+        Bundle-level code/architecture metrics for OSGi/Eclipse RCP projects.
+
+        Component = OSGi Bundle (:Osgi:Bundle, label set by osgi:Bundle).
+        Scope     = bundles whose Bundle-SymbolicName matches $projectBundlePattern.
+                    The parameter is REQUIRED — projects must set it explicitly to
+                    distinguish their own bundles from platform / third-party bundles.
+
+        Inputs (built-in / OSGi plugin):
+          - :Method.effectiveLineCount                       (java plugin)
+          - :Type, :Interface, :Type.abstract                (java plugin)
+          - (:Osgi:Bundle)-[:CONTAINS*1..2]->(:Type)         (osgi plugin)
+          - (:Osgi:Bundle)-[d:DEPENDS_ON]->(:Osgi:Bundle)
+              with d.typeDependencyCount                     (osgi:BundleDependencyWeight)
+
+        Robert C. Martin's coupling metrics:
+          Ca  = number of project bundles depending on this bundle
+          Ce  = number of project bundles this bundle depends on
+          I   = Ce / (Ca + Ce)             instability       in [0,1]
+          A   = (interfaces + abstract classes) / total types in [0,1]
+          D   = | A + I - 1 |              distance from main sequence  in [0,1]
+
+        Notes:
+          - Coupling is computed only against other ProjectBundles, so dependencies
+            into Eclipse Platform / external bundles do not pollute the score.
+          - Type-weighted variants (Ca_weighted, Ce_weighted) are also stored, using
+            d.typeDependencyCount; manifest-only edges contribute 0.
+          - Abstractness includes inner / anonymous types. Filter on (NOT t:Inner)
+            in a downstream variant if you want a stricter view.
+
+        Activation example (.jqassistant.yml):
+
+            jqassistant:
+              analyze:
+                groups:
+                  - osgi:Default
+                  - osgi:metrics:Default
+                rule:
+                  parameters:
+                    projectBundlePattern: "com\\.example\\.product(\\..*)?"
+    -->
+
+    <concept id="osgi:metrics:ProjectBundle">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresParameter name="projectBundlePattern" type="String"/>
+        <description>
+            Marks :Osgi:Bundle nodes whose bundleSymbolicName matches
+            $projectBundlePattern (Java regex) with the additional :ProjectBundle label.
+            All metric concepts below work exclusively on :ProjectBundle.
+            The parameter is required and has no default — set it in
+            .jqassistant.yml under analyze.rule.parameters.projectBundlePattern.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle)
+            WHERE
+              b.bundleSymbolicName =~ $projectBundlePattern
+            CALL {
+              WITH b
+              SET  b:ProjectBundle
+            } IN TRANSACTIONS
+            RETURN
+              count(b) AS ProjectBundles
+        ]]></cypher>
+        <verify>
+            <aggregation/>
+        </verify>
+    </concept>
+
+    <concept id="osgi:metrics:BundleEffectiveLineCount">
+        <requiresConcept refId="osgi:metrics:ProjectBundle"/>
+        <description>
+            Sums :Method.effectiveLineCount for all methods of all types contained
+            in a project bundle. Writes :Osgi:Bundle.effectiveLineCount (0 if
+            classes were compiled without debug line numbers).
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)
+            OPTIONAL MATCH
+              (b)-[:CONTAINS*1..2]->(t:Java:Type)-[:DECLARES]->(m:Java:Method)
+            WITH
+              b, coalesce(sum(m.effectiveLineCount), 0) AS loc
+            CALL {
+              WITH b, loc
+              SET  b.effectiveLineCount = loc
+            } IN TRANSACTIONS
+            RETURN
+              count(b) AS Bundles
+        ]]></cypher>
+        <verify>
+            <aggregation/>
+        </verify>
+    </concept>
+
+    <concept id="osgi:metrics:BundleCoupling">
+        <requiresConcept refId="osgi:metrics:ProjectBundle"/>
+        <requiresConcept refId="osgi:BundleDependencyWeight"/>
+        <description>
+            Computes afferent / efferent coupling and instability per project bundle,
+            counting only edges to/from other :ProjectBundle nodes.
+            Writes Ca, Ce, instability and the type-weighted Ca_weighted, Ce_weighted.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)
+            OPTIONAL MATCH
+              (b)-[out:DEPENDS_ON]->(target:Osgi:Bundle:ProjectBundle)
+            WITH
+              b,
+              count(DISTINCT target)                              AS Ce,
+              coalesce(sum(out.typeDependencyCount), 0)           AS CeWeighted
+            OPTIONAL MATCH
+              (b)<-[in:DEPENDS_ON]-(source:Osgi:Bundle:ProjectBundle)
+            WITH
+              b, Ce, CeWeighted,
+              count(DISTINCT source)                              AS Ca,
+              coalesce(sum(in.typeDependencyCount), 0)            AS CaWeighted
+            CALL {
+              WITH b, Ca, Ce, CaWeighted, CeWeighted
+              SET  b.Ca          = Ca,
+                   b.Ce          = Ce,
+                   b.Ca_weighted = CaWeighted,
+                   b.Ce_weighted = CeWeighted,
+                   b.instability = CASE WHEN Ca + Ce = 0
+                                        THEN null
+                                        ELSE 1.0 * Ce / (Ca + Ce)
+                                   END
+            } IN TRANSACTIONS
+            RETURN
+              count(b) AS Bundles
+        ]]></cypher>
+        <verify>
+            <aggregation/>
+        </verify>
+    </concept>
+
+    <concept id="osgi:metrics:BundleAbstractness">
+        <requiresConcept refId="osgi:metrics:ProjectBundle"/>
+        <description>
+            A = (interface + abstract class types) / total types contained in the bundle.
+            Writes typeCount, abstractTypeCount, abstractness on :Osgi:Bundle.
+            Inner / anonymous types are included; null when the bundle has no types.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)
+            OPTIONAL MATCH
+              (b)-[:CONTAINS*1..2]->(t:Java:Type)
+            WITH
+              b,
+              count(t)                                                          AS total,
+              sum(CASE WHEN t:Interface OR t.abstract = true THEN 1 ELSE 0 END) AS abstr
+            CALL {
+              WITH b, total, abstr
+              SET  b.typeCount         = total,
+                   b.abstractTypeCount = abstr,
+                   b.abstractness      = CASE WHEN total = 0
+                                              THEN null
+                                              ELSE 1.0 * abstr / total
+                                         END
+            } IN TRANSACTIONS
+            RETURN
+              count(b) AS Bundles
+        ]]></cypher>
+        <verify>
+            <aggregation/>
+        </verify>
+    </concept>
+
+    <concept id="osgi:metrics:BundleDistance">
+        <requiresConcept refId="osgi:metrics:BundleCoupling"/>
+        <requiresConcept refId="osgi:metrics:BundleAbstractness"/>
+        <description>
+            Distance from the main sequence: D = | A + I - 1 |.
+            Writes :Osgi:Bundle.distance (null if A or I is null).
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)
+            WITH
+              b,
+              CASE WHEN b.abstractness IS NULL OR b.instability IS NULL
+                   THEN null
+                   ELSE abs(b.abstractness + b.instability - 1.0)
+              END AS d
+            CALL {
+              WITH b, d
+              SET  b.distance = d
+            } IN TRANSACTIONS
+            RETURN
+              count(b) AS Bundles
+        ]]></cypher>
+        <verify>
+            <aggregation/>
+        </verify>
+    </concept>
+
+    <concept id="osgi:metrics:BundleInCycle">
+        <requiresConcept refId="osgi:metrics:ProjectBundle"/>
+        <description>
+            Sets :Osgi:Bundle.inCycle = true on bundles that participate in a cyclic
+            DEPENDS_ON chain among project bundles, false otherwise.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)
+            CALL {
+              WITH b
+              SET  b.inCycle = false
+            } IN TRANSACTIONS
+            WITH
+              count(*) AS reset
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)-[:DEPENDS_ON]->(other:Osgi:Bundle:ProjectBundle),
+              shortestPath((other)-[:DEPENDS_ON*]->(b))
+            WHERE
+              b <> other
+            CALL {
+              WITH b
+              SET  b.inCycle = true
+            } IN TRANSACTIONS
+            RETURN
+              count(DISTINCT b) AS BundlesInCycle
+        ]]></cypher>
+        <verify>
+            <aggregation min="0"/>
+        </verify>
+    </concept>
+
+    <constraint id="osgi:metrics:BundleCycle" severity="major">
+        <requiresConcept refId="osgi:metrics:ProjectBundle"/>
+        <description>Project bundles must not participate in cyclic Require-Bundle / package-wiring chains.</description>
+        <cypher><![CDATA[
+            MATCH
+              (b1:Osgi:Bundle:ProjectBundle)-[:DEPENDS_ON]->(b2:Osgi:Bundle:ProjectBundle),
+              path = allShortestPaths((b2)-[:DEPENDS_ON*]->(b1))
+            WHERE
+              b1 <> b2
+            RETURN
+              b1.bundleSymbolicName AS Bundle,
+              [n IN nodes(path) | n.bundleSymbolicName] AS Cycle
+            ORDER BY
+              Bundle
+        ]]></cypher>
+        <report primaryColumn="Bundle"/>
+    </constraint>
+
+    <concept id="osgi:metrics:BundleMetricsReport">
+        <requiresConcept refId="osgi:metrics:BundleEffectiveLineCount"/>
+        <requiresConcept refId="osgi:metrics:BundleCoupling"/>
+        <requiresConcept refId="osgi:metrics:BundleAbstractness"/>
+        <requiresConcept refId="osgi:metrics:BundleDistance"/>
+        <requiresConcept refId="osgi:metrics:BundleInCycle"/>
+        <description>Tabular report: one row per project bundle with all metrics.</description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)
+            RETURN
+              b.bundleSymbolicName AS Bundle,
+              b.typeCount          AS Types,
+              b.abstractTypeCount  AS AbstractTypes,
+              b.effectiveLineCount AS LoC,
+              b.Ca                 AS Ca,
+              b.Ce                 AS Ce,
+              b.Ca_weighted        AS CaWeighted,
+              b.Ce_weighted        AS CeWeighted,
+              b.instability        AS I,
+              b.abstractness       AS A,
+              b.distance           AS D,
+              b.inCycle            AS InCycle
+            ORDER BY
+              b.distance DESC, b.bundleSymbolicName
+        ]]></cypher>
+        <report type="csv" primaryColumn="Bundle"/>
+    </concept>
+
+    <group id="osgi:metrics:Default">
+        <includeConcept refId="osgi:metrics:ProjectBundle"/>
+        <includeConcept refId="osgi:metrics:BundleEffectiveLineCount"/>
+        <includeConcept refId="osgi:metrics:BundleCoupling"/>
+        <includeConcept refId="osgi:metrics:BundleAbstractness"/>
+        <includeConcept refId="osgi:metrics:BundleDistance"/>
+        <includeConcept refId="osgi:metrics:BundleInCycle"/>
+        <includeConcept refId="osgi:metrics:BundleMetricsReport"/>
+    </group>
+
+    <group id="osgi:metrics:Constraints">
+        <includeConstraint refId="osgi:metrics:BundleCycle"/>
+    </group>
+
+</jqassistant-rules>

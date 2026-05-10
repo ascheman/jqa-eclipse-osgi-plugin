@@ -7,6 +7,7 @@
     <rules>
         <resource>osgi-bundle.xml</resource>
         <resource>osgi-packages.xml</resource>
+        <resource>osgi-metrics.xml</resource>
         <resource>eclipse.xml</resource>
         <resource>osgi-constraints.xml</resource>
         <resource>osgi-reports.xml</resource>

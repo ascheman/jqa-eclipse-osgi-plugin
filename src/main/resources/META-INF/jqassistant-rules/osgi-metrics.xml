@@ -257,12 +257,17 @@
         <requiresConcept refId="osgi:metrics:BundleAbstractness"/>
         <requiresConcept refId="osgi:metrics:BundleDistance"/>
         <requiresConcept refId="osgi:metrics:BundleInCycle"/>
-        <description>Tabular report: one row per project bundle with all metrics.</description>
+        <description>
+            One row per project bundle with all metrics.
+            Rendered both as a single CSV overview (target/jqassistant/report/csv/) and
+            as per-bundle AsciiDoc fragments via templates/osgi-metrics-BundleMetricsReport.adoc.ftl
+            (target/jqassistant/report/asciidoc/&lt;SymbolicName&gt;/...).
+        </description>
         <cypher><![CDATA[
             MATCH
               (b:Osgi:Bundle:ProjectBundle)
             RETURN
-              b.bundleSymbolicName AS Bundle,
+              b.bundleSymbolicName AS SymbolicName,
               b.typeCount          AS Types,
               b.abstractTypeCount  AS AbstractTypes,
               b.effectiveLineCount AS LoC,
@@ -277,7 +282,7 @@
             ORDER BY
               b.distance DESC, b.bundleSymbolicName
         ]]></cypher>
-        <report type="csv" primaryColumn="Bundle"/>
+        <report type="template,csv" primaryColumn="SymbolicName"/>
     </concept>
 
     <group id="osgi:metrics:Default">

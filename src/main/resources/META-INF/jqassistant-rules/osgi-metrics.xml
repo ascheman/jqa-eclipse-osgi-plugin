@@ -233,6 +233,115 @@
         </verify>
     </concept>
 
+    <concept id="osgi:metrics:BundleInternalPackageDependency">
+        <requiresConcept refId="osgi:metrics:ProjectBundle"/>
+        <requiresConcept refId="java-classpath:ResolveDependsOn"/>
+        <requiresParameter name="projectPackagePattern" type="String" defaultValue=".*"/>
+        <description>
+            Materializes (:Java:Package)-[:DEPENDS_ON_INTERNAL {bundle, weight}]->(:Java:Package)
+            edges between distinct packages whose types are both contained in the same
+            :ProjectBundle. weight = number of distinct target types referenced.
+
+            Two layers of scope:
+              * Bundle: only :ProjectBundle nodes are matched (i.e. only bundles whose
+                symbolic name matches $projectBundlePattern).
+              * Package: both p1 and p2 must additionally match $projectPackagePattern
+                (Java regex, default ".*" = no extra restriction). Use this to exclude
+                vendored / shaded / utility packages inside project bundles whose FQN
+                doesn't belong to your own namespace. Example:
+
+                    rule:
+                      parameters:
+                        projectBundlePattern:  "org\\.eclipse\\.mylyn(\\..*)?"
+                        projectPackagePattern: "org\\.eclipse\\.mylyn\\..*"
+
+            Each edge is scoped to one bundle (via the `bundle` property) so
+            cycle detection can ignore inter-bundle paths.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (b:Osgi:Bundle:ProjectBundle)-[:CONTAINS*1..2]->(t1:Java:Type),
+              (b)-[:CONTAINS*1..2]->(t2:Java:Type),
+              (t1)-[:DEPENDS_ON]->(t2),
+              (p1:Java:Package)-[:CONTAINS]->(t1),
+              (p2:Java:Package)-[:CONTAINS]->(t2)
+            WHERE
+              p1 <> p2
+              AND p1.fqn =~ $projectPackagePattern
+              AND p2.fqn =~ $projectPackagePattern
+            WITH
+              b, p1, p2, count(DISTINCT t2) AS weight
+            MERGE
+              (p1)-[r:DEPENDS_ON_INTERNAL {bundle: b.bundleSymbolicName}]->(p2)
+            SET
+              r.weight = weight
+            RETURN
+              count(r) AS Edges
+        ]]></cypher>
+        <verify>
+            <aggregation min="0"/>
+        </verify>
+    </concept>
+
+    <concept id="osgi:metrics:BundlePackageCycleReport">
+        <requiresConcept refId="osgi:metrics:BundleInternalPackageDependency"/>
+        <description>
+            Per-bundle internal package dependency edges with an `InCycle` flag set to
+            true when the edge participates in a same-bundle cycle.
+            Uses shortestPath bounded at 5 hops — cycles longer than that are not
+            flagged. Increase the *1..5 bound if your project routinely has longer
+            chains and the query stays tractable.
+            Rendered into a PlantUML diagram per project bundle via
+            templates/osgi-metrics-BundlePackageCycleReport.adoc.ftl.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (p1:Java:Package)-[d:DEPENDS_ON_INTERNAL]->(p2:Java:Package)
+            OPTIONAL MATCH
+              back = shortestPath((p2)-[:DEPENDS_ON_INTERNAL*1..5]->(p1))
+            WHERE
+              ALL(rel IN relationships(back) WHERE rel.bundle = d.bundle)
+            RETURN
+              d.bundle AS SymbolicName,
+              p1.fqn  AS Source,
+              p2.fqn  AS Target,
+              d.weight AS Weight,
+              (back IS NOT NULL) AS InCycle
+            ORDER BY
+              SymbolicName, InCycle DESC, Source, Target
+        ]]></cypher>
+        <report type="template" primaryColumn="SymbolicName"/>
+    </concept>
+
+    <constraint id="osgi:metrics:BundleInternalPackageCycle" severity="major">
+        <requiresConcept refId="osgi:metrics:BundleInternalPackageDependency"/>
+        <description>
+            Packages within a single project bundle must not form circular dependencies.
+            A cycle is any path p1 → ... → p2 → ... → p1 whose edges all belong to the
+            same bundle (variable-length search bounded at 20 hops).
+            Only :ProjectBundle bundles (matching $projectBundlePattern) are checked —
+            third-party bundles never appear here because the upstream helper concept
+            does not create :DEPENDS_ON_INTERNAL edges for them.
+        </description>
+        <cypher><![CDATA[
+            MATCH
+              (p1:Java:Package)-[d:DEPENDS_ON_INTERNAL]->(p2:Java:Package)
+            MATCH
+              back = shortestPath((p2)-[:DEPENDS_ON_INTERNAL*1..5]->(p1))
+            WHERE
+              ALL(rel IN relationships(back) WHERE rel.bundle = d.bundle)
+            RETURN
+              d.bundle AS Bundle,
+              p1.fqn AS Source,
+              p2.fqn AS Target,
+              length(back) + 1 AS CycleLength,
+              [n IN nodes(back) | n.fqn] AS BackPath
+            ORDER BY
+              Bundle, CycleLength, Source, Target
+        ]]></cypher>
+        <report primaryColumn="Bundle"/>
+    </constraint>
+
     <constraint id="osgi:metrics:BundleCycle" severity="major">
         <requiresConcept refId="osgi:metrics:ProjectBundle"/>
         <description>Project bundles must not participate in cyclic Require-Bundle / package-wiring chains.</description>
@@ -292,11 +401,14 @@
         <includeConcept refId="osgi:metrics:BundleAbstractness"/>
         <includeConcept refId="osgi:metrics:BundleDistance"/>
         <includeConcept refId="osgi:metrics:BundleInCycle"/>
+        <includeConcept refId="osgi:metrics:BundleInternalPackageDependency"/>
         <includeConcept refId="osgi:metrics:BundleMetricsReport"/>
+        <includeConcept refId="osgi:metrics:BundlePackageCycleReport"/>
     </group>
 
     <group id="osgi:metrics:Constraints">
         <includeConstraint refId="osgi:metrics:BundleCycle"/>
+        <includeConstraint refId="osgi:metrics:BundleInternalPackageCycle"/>
     </group>
 
 </jqassistant-rules>

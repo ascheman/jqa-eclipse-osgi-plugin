@@ -6,6 +6,7 @@
         <description>OSGi validation constraints: detects unresolved Require-Bundle and Fragment-Host references, circular bundle dependencies, missing Bundle-Version headers, and unsatisfied Import-Package entries.</description>
         <includeConstraint refId="osgi:UnresolvedRequiredBundle"/>
         <includeConstraint refId="osgi:UnresolvedFragmentHost"/>
+        <includeConstraint refId="osgi:AmbiguousTypeAcrossFragments"/>
         <includeConstraint refId="osgi:CircularBundleDependency"/>
         <includeConstraint refId="osgi:MissingBundleVersion"/>
         <includeConstraint refId="osgi:UnsatisfiedImport"/>
@@ -22,6 +23,7 @@
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(rb:Osgi:RequiredBundle)
             WHERE NOT (rb)-[:RESOLVES_TO]->(:Osgi:Bundle)
+              AND bundle:Osgi:Analyzed
             RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, rb.symbolicName AS UnresolvedRequiredBundle
             ORDER BY Bundle
         ]]></cypher>
@@ -35,8 +37,36 @@
         <cypher><![CDATA[
             MATCH (fragment:Osgi:Fragment)
             WHERE NOT (fragment)-[:FRAGMENT_OF]->(:Osgi:Bundle)
+              AND fragment:Osgi:Analyzed
             RETURN DISTINCT fragment.bundleSymbolicName AS Fragment, fragment.bundleVersion AS FragmentVersion, fragment.fragmentHostSymbolicName AS UnresolvedHost
             ORDER BY Fragment
+        ]]></cypher>
+    </constraint>
+
+    <!--
+        Detect the same fully qualified type provided by more than one bundle within a single
+        host's class space (the host and/or its attached fragments). Because a fragment shares
+        the host's classloader, a duplicate FQN is resolved host-first and then by ascending
+        fragment bundle id; the winner is therefore install-order dependent and fragile. This is
+        exactly the ambiguity that arises when a class is present in both a bundle and its
+        fragment(s). Unrelated bundles with the same FQN are NOT reported (they use separate
+        classloaders and are a normal situation).
+    -->
+    <constraint id="osgi:AmbiguousTypeAcrossFragments" severity="minor">
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>Finds fully qualified types provided by more than one bundle within a single host's class space (a host and its attached fragments). Such a duplicate is shadowed following OSGi host-first, then ascending-bundle-id order, so the effective class is install-order dependent and fragile. Prefer a single provider per type across a host and its fragments.</description>
+        <cypher><![CDATA[
+            MATCH (host:Osgi:Bundle)
+            WHERE NOT (host)-[:FRAGMENT_OF]->(:Osgi:Bundle)
+              AND host:Osgi:Analyzed
+            OPTIONAL MATCH (host)<-[:FRAGMENT_OF]-(frag:Osgi:Bundle)
+            WITH host, [host] + collect(DISTINCT frag) AS members
+            UNWIND members AS member
+            MATCH (member)-[:CONTAINS]->(type:Type)
+            WITH host, type.fqn AS Fqn, collect(DISTINCT member.bundleSymbolicName) AS ProvidedBy
+            WHERE size(ProvidedBy) > 1
+            RETURN host.bundleSymbolicName AS Host, Fqn AS DuplicatedType, ProvidedBy
+            ORDER BY Host, DuplicatedType
         ]]></cypher>
     </constraint>
 
@@ -49,6 +79,7 @@
             MATCH (a:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(b:Osgi:Bundle),
                   (b)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(a)
             WHERE id(a) < id(b)
+              AND (a:Osgi:Analyzed OR b:Osgi:Analyzed)
             RETURN DISTINCT a.bundleSymbolicName AS BundleA, a.bundleVersion AS VersionA, b.bundleSymbolicName AS BundleB, b.bundleVersion AS VersionB
             ORDER BY BundleA
         ]]></cypher>
@@ -57,10 +88,12 @@
     <!-- Bundles missing a Bundle-Version -->
     <constraint id="osgi:MissingBundleVersion">
         <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:AnalyzedBundle"/>
         <description>Finds OSGi bundles that do not declare a Bundle-Version in their manifest. Every bundle should have an explicit version.</description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)
             WHERE bundle.bundleVersion IS NULL
+              AND bundle:Osgi:Analyzed
             RETURN bundle.bundleSymbolicName AS BundleWithoutVersion
             ORDER BY bundle.bundleSymbolicName
         ]]></cypher>
@@ -75,6 +108,7 @@
             MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
             WHERE NOT (ip)<-[:SATISFIES]-(:Osgi:ExportedPackage)
               AND ip.optional = false
+              AND bundle:Osgi:Analyzed
             RETURN DISTINCT bundle.bundleSymbolicName AS Bundle, bundle.bundleVersion AS BundleVersion, ip.fqn AS UnsatisfiedPackageImport, ip.version AS ImportVersion
             ORDER BY Bundle, UnsatisfiedPackageImport
         ]]></cypher>
@@ -88,6 +122,7 @@
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
             WHERE ip.fqn =~ '^[a-zA-Z].*'
+              AND bundle:Osgi:Analyzed
               AND NOT EXISTS {
                 MATCH (bundle)-[:CONTAINS*1..2]->(t:Type)-[:DEPENDS_ON]->(dep:Type)
                 WHERE dep.fqn STARTS WITH ip.fqn + '.'
@@ -105,6 +140,7 @@
         <cypher><![CDATA[
             MATCH (source:Osgi:Bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(target:Osgi:Bundle)
             WHERE source <> target
+              AND source:Osgi:Analyzed
               AND NOT EXISTS {
                 MATCH (source)-[:CONTAINS*1..2]->(t:Type)-[:DEPENDS_ON]->(dep:Type)<-[:CONTAINS*1..2]-(target)
               }
@@ -123,6 +159,7 @@
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:IMPORTS_PACKAGE]->(ip:Osgi:ImportedPackage)
             WHERE ip.fqn =~ '^[a-zA-Z].*'
+              AND bundle:Osgi:Analyzed
             MATCH (bundle)-[:REQUIRES_BUNDLE]->(:Osgi:RequiredBundle)-[:RESOLVES_TO]->(required:Osgi:Bundle)
                   -[:EXPORTS_PACKAGE]->(ep:Osgi:ExportedPackage)
             WHERE ep.fqn = ip.fqn

@@ -1,0 +1,81 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <!--
+        Eclipse commands (org.eclipse.ui.commands) are declared once by id and referenced by id
+        from handlers (org.eclipse.ui.handlers), key bindings (org.eclipse.ui.bindings), and menu
+        contributions (org.eclipse.ui.menus) via a `commandId` attribute. Unlike a Java class, a
+        command id is resolved GLOBALLY by the Eclipse command service, not within a single
+        bundle's class space, so these rules match commandId references against all declared
+        commands in the graph.
+
+        Same prerequisite as the other Eclipse rules: plugin.xml / fragment.xml must be present in
+        the graph (JAR-form scan, or file-scope scan of the descriptors).
+    -->
+    <group id="eclipse:Commands">
+        <description>Models Eclipse commands and commandId references (handlers, key bindings, menu contributions) and flags references to commands that are not declared in any scanned bundle.</description>
+        <includeConcept refId="eclipse:Command"/>
+        <includeConcept refId="eclipse:CommandReference"/>
+        <includeConstraint refId="eclipse:UnresolvedCommandReference"/>
+    </group>
+
+    <!-- Label <command id="..."> declarations under org.eclipse.ui.commands -->
+    <concept id="eclipse:Command">
+        <requiresConcept refId="eclipse:Extension"/>
+        <description>Labels &lt;command&gt; elements declared under an &lt;extension point="org.eclipse.ui.commands"&gt; as :Eclipse:Command, extracts the id into commandId, and creates DECLARES_COMMAND relationships from the declaring bundle.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+            WHERE ext.point = 'org.eclipse.ui.commands'
+            MATCH (ext)-[:HAS_ELEMENT]->(cmd:Xml:Element {name: 'command'})
+                  -[:HAS_ATTRIBUTE]->(idAttr:Xml:Attribute {name: 'id'})
+            WHERE idAttr.value IS NOT NULL AND idAttr.value <> ''
+            SET cmd:Eclipse:Command, cmd.commandId = idAttr.value
+            MERGE (bundle)-[:DECLARES_COMMAND]->(cmd)
+            RETURN bundle.bundleSymbolicName AS Bundle, cmd.commandId AS CommandId
+            ORDER BY Bundle, CommandId
+        ]]></cypher>
+    </concept>
+
+    <!-- Resolve commandId references (handlers, bindings, menus) to declared commands -->
+    <concept id="eclipse:CommandReference">
+        <requiresConcept refId="eclipse:Command"/>
+        <description>Labels any extension descendant element carrying a `commandId` attribute as :Eclipse:CommandReference (setting commandId), and creates REFERENCES_COMMAND relationships to the matching :Eclipse:Command. Command ids are resolved globally across all scanned bundles, matching the Eclipse command service.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..6]->(refEl:Xml:Element)
+                  -[:HAS_ATTRIBUTE]->(cidAttr:Xml:Attribute {name: 'commandId'})
+            WHERE cidAttr.value IS NOT NULL AND cidAttr.value <> ''
+            SET refEl:Eclipse:CommandReference, refEl.commandId = cidAttr.value
+            WITH refEl
+            OPTIONAL MATCH (cmd:Eclipse:Command) WHERE cmd.commandId = refEl.commandId
+            FOREACH (_ IN CASE WHEN cmd IS NULL THEN [] ELSE [1] END |
+                MERGE (refEl)-[:REFERENCES_COMMAND]->(cmd))
+            RETURN DISTINCT refEl.commandId AS CommandId, count(cmd) AS ResolvedTargets
+            ORDER BY CommandId
+        ]]></cypher>
+    </concept>
+
+    <!--
+        A commandId reference that does not resolve to any declared command. Reported at minor
+        severity because a referenced command may be declared by a platform bundle that is not
+        part of the scan (e.g. org.eclipse.ui.file.save); it is a genuine defect only when the
+        command was expected to be declared by a scanned bundle. High-signal case: a typo in a
+        commandId for an in-project command silently disables the handler / key binding / menu.
+    -->
+    <constraint id="eclipse:UnresolvedCommandReference" severity="minor">
+        <requiresConcept refId="eclipse:CommandReference"/>
+        <description>Finds `commandId` references (from handlers, key bindings, or menu contributions) that do not resolve to any :Eclipse:Command declared in the scanned bundles. A mistyped or stale commandId silently disables the referencing handler, binding, or menu item.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..6]->(refEl:Eclipse:CommandReference)
+            WHERE NOT (refEl)-[:REFERENCES_COMMAND]->(:Eclipse:Command)
+              AND bundle:Osgi:Analyzed
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle,
+                   ext.point AS ReferencingPoint,
+                   refEl.commandId AS UnresolvedCommandId
+            ORDER BY Bundle, UnresolvedCommandId
+        ]]></cypher>
+    </constraint>
+
+</jqassistant-rules>

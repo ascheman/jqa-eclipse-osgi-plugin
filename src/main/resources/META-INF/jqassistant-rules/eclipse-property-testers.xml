@@ -1,0 +1,291 @@
+<jqassistant-rules xmlns="http://schema.jqassistant.org/rule/v2.9"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://schema.jqassistant.org/rule/v2.9 https://schema.jqassistant.org/rule/jqassistant-rule-v2.2.xsd">
+
+    <!--
+        Property testers (org.eclipse.core.expressions.propertyTesters) are declared in a
+        bundle's plugin.xml (or a fragment's fragment.xml) and map a receiver `type` to a
+        PropertyTester `class` that supplies custom `properties` under a `namespace`. These rules
+        model the declarations, resolve them to the Java type graph, and validate the wiring.
+
+        Fragments: a fragment.xml-declared tester is attributed to the fragment but its `type`
+        and `class` are resolved against the HOST's class space (host + attached fragments),
+        because a fragment shares the host's classloader. Where the same fully qualified type is
+        provided by both the host and a fragment, the host copy wins (OSGi host-first loading).
+
+        PREREQUISITE: plugin.xml must be present in the graph as an (:Xml:Document) that is
+        CONTAINS-linked from the (:Osgi:Bundle). This holds when bundles are scanned in JAR form
+        (the archive scanner descends into plugin.xml and parses it via the XML plugin). For
+        directory-form bundles scanned with `scope: java:classpath`, the top-level plugin.xml is
+        NOT picked up as an :Xml:Document — add the plugin.xml files with `scope: file` (or scan
+        built JARs) so these concepts have data to work with. This is the same prerequisite as the
+        existing eclipse:Extension / eclipse:ExtensionPoint concepts.
+    -->
+
+    <group id="eclipse:PropertyTesters">
+        <description>Models Eclipse core-expressions property testers from plugin.xml, resolves them to the Java type graph, and validates that declarations are wired up (existing implementation class, resolvable receiver type) and that view-model types are covered by a tester.</description>
+        <includeConcept refId="eclipse:PropertyTester"/>
+        <includeConcept refId="eclipse:PropertyTesterTestsType"/>
+        <includeConcept refId="eclipse:PropertyTesterImplementedBy"/>
+        <includeConcept refId="eclipse:ViewModelType"/>
+        <includeConcept refId="eclipse:PropertyReference"/>
+        <includeConcept refId="eclipse:PropertyReferenceResolution"/>
+        <includeConstraint refId="eclipse:UnresolvedPropertyTesterClass"/>
+        <includeConstraint refId="eclipse:UnresolvedPropertyTesterType"/>
+        <includeConstraint refId="eclipse:PropertyTesterClassProvidedByFragment"/>
+        <includeConstraint refId="eclipse:UnsatisfiedPropertyReference"/>
+        <includeConstraint refId="eclipse:ViewModelWithoutPropertyTester"/>
+    </group>
+
+    <!-- Parse <propertyTester> elements from the core-expressions extension -->
+    <concept id="eclipse:PropertyTester">
+        <requiresConcept refId="eclipse:Extension"/>
+        <description>Labels &lt;propertyTester&gt; elements declared under an &lt;extension point="org.eclipse.core.expressions.propertyTesters"&gt; as :Eclipse:PropertyTester and creates DECLARES_PROPERTY_TESTER relationships from the bundle. Extracts id, type (receiver type), namespace, properties, and class attributes onto the node.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+            WHERE ext.point = 'org.eclipse.core.expressions.propertyTesters'
+            MATCH (ext)-[:HAS_ELEMENT]->(pt:Xml:Element {name: 'propertyTester'})
+            OPTIONAL MATCH (pt)-[:HAS_ATTRIBUTE]->(idAttr:Xml:Attribute {name: 'id'})
+            OPTIONAL MATCH (pt)-[:HAS_ATTRIBUTE]->(typeAttr:Xml:Attribute {name: 'type'})
+            OPTIONAL MATCH (pt)-[:HAS_ATTRIBUTE]->(nsAttr:Xml:Attribute {name: 'namespace'})
+            OPTIONAL MATCH (pt)-[:HAS_ATTRIBUTE]->(propsAttr:Xml:Attribute {name: 'properties'})
+            OPTIONAL MATCH (pt)-[:HAS_ATTRIBUTE]->(classAttr:Xml:Attribute {name: 'class'})
+            SET pt:Eclipse:PropertyTester,
+                pt.propertyTesterId = idAttr.value,
+                pt.testerType = typeAttr.value,
+                pt.namespace = nsAttr.value,
+                pt.properties = propsAttr.value,
+                pt.testerClass = classAttr.value
+            MERGE (bundle)-[:DECLARES_PROPERTY_TESTER]->(pt)
+            RETURN bundle.bundleSymbolicName AS Bundle,
+                   pt.testerType AS ReceiverType,
+                   pt.namespace AS Namespace,
+                   pt.properties AS Properties,
+                   pt.testerClass AS TesterClass
+            ORDER BY Bundle, ReceiverType
+        ]]></cypher>
+    </concept>
+
+    <!-- Resolve the receiver `type` attribute to a :Type node -->
+    <concept id="eclipse:PropertyTesterTestsType">
+        <requiresConcept refId="eclipse:PropertyTester"/>
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>For each :Eclipse:PropertyTester with a `type` attribute, creates a TESTS_TYPE relationship to the matching :Type resolved within the declaring bundle's class space -- the host bundle plus the host's attached fragments, since a fragment shares the host's classloader. When the same fully qualified type is provided by both the host and a fragment, the host copy is preferred, mirroring OSGi host-first class loading. Types in unrelated bundles are intentionally NOT matched.</description>
+        <cypher><![CDATA[
+            MATCH (declaring:Osgi:Bundle)-[:DECLARES_PROPERTY_TESTER]->(pt:Eclipse:PropertyTester)
+            WHERE pt.testerType IS NOT NULL
+              AND pt.testerType =~ '^[a-zA-Z_$][a-zA-Z0-9_$.]*$'
+            // host = the declaring bundle itself, or its host if the declaring bundle is a fragment
+            OPTIONAL MATCH (declaring)-[:FRAGMENT_OF]->(h:Osgi:Bundle)
+            WITH pt, coalesce(h, declaring) AS host
+            // resolve the receiver type within the host's class space (host + its fragments)
+            MATCH (member:Osgi:Bundle)-[:CONTAINS]->(type:Type {fqn: pt.testerType})
+            WHERE member = host OR (member)-[:FRAGMENT_OF]->(host)
+            WITH pt, collect({t: type, inHost: member = host}) AS cands
+            // prefer the host copy; otherwise take a fragment copy
+            WITH pt, coalesce([c IN cands WHERE c.inHost][0].t, cands[0].t) AS chosen
+            WHERE chosen IS NOT NULL
+            MERGE (pt)-[:TESTS_TYPE]->(chosen)
+            RETURN DISTINCT pt.testerType AS ReceiverType, chosen.fqn AS ResolvedType
+            ORDER BY ReceiverType
+        ]]></cypher>
+    </concept>
+
+    <!-- Resolve the implementing `class` attribute to a :Type node -->
+    <concept id="eclipse:PropertyTesterImplementedBy">
+        <requiresConcept refId="eclipse:PropertyTester"/>
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>For each :Eclipse:PropertyTester with a `class` attribute, creates an IMPLEMENTED_BY relationship to the implementing :Type (the class that extends org.eclipse.core.expressions.PropertyTester) resolved within the declaring bundle's class space -- the host bundle plus its attached fragments. When the class is provided by both the host and a fragment, the host copy is preferred. Types in unrelated bundles are intentionally NOT matched.</description>
+        <cypher><![CDATA[
+            MATCH (declaring:Osgi:Bundle)-[:DECLARES_PROPERTY_TESTER]->(pt:Eclipse:PropertyTester)
+            WHERE pt.testerClass IS NOT NULL
+              AND pt.testerClass =~ '^[a-zA-Z_$][a-zA-Z0-9_$.]*$'
+            OPTIONAL MATCH (declaring)-[:FRAGMENT_OF]->(h:Osgi:Bundle)
+            WITH pt, coalesce(h, declaring) AS host
+            MATCH (member:Osgi:Bundle)-[:CONTAINS]->(type:Type {fqn: pt.testerClass})
+            WHERE member = host OR (member)-[:FRAGMENT_OF]->(host)
+            WITH pt, collect({t: type, inHost: member = host}) AS cands
+            WITH pt, coalesce([c IN cands WHERE c.inHost][0].t, cands[0].t) AS chosen
+            WHERE chosen IS NOT NULL
+            MERGE (pt)-[:IMPLEMENTED_BY]->(chosen)
+            RETURN DISTINCT pt.testerClass AS TesterClass, chosen.fqn AS ResolvedType
+            ORDER BY TesterClass
+        ]]></cypher>
+    </concept>
+
+    <!--
+        Candidate set ("denominator") for the coverage constraint below. A property tester only
+        makes sense for the view-model / domain types that appear as selection receivers in UI
+        expressions; there is no general "every type needs a tester" rule. The candidate set is
+        therefore project-specific and is expressed as a regular expression over the fully
+        qualified type name. Override `viewModelPattern` to match your convention, e.g.
+        '.*\\.viewmodel\\..*' (package based) or '.*ViewModel$' (name based).
+    -->
+    <concept id="eclipse:ViewModelType">
+        <requiresParameter name="viewModelPattern" type="String" defaultValue=".*ViewModel$"/>
+        <description>Labels :Type nodes whose fully qualified name matches the `viewModelPattern` regular expression as :Eclipse:ViewModelType. These are the types expected to be covered by a property tester. The default pattern matches type names ending in "ViewModel"; override it to fit the project's naming or package convention.</description>
+        <cypher><![CDATA[
+            MATCH (type:Type)
+            WHERE type.fqn =~ $viewModelPattern
+            SET type:Eclipse:ViewModelType
+            RETURN type.fqn AS ViewModelType, coalesce(type.abstract, false) AS IsAbstract
+            ORDER BY ViewModelType
+        ]]></cypher>
+    </concept>
+
+    <!--
+        High-value integrity check: the implementing class is always shipped by the declaring
+        bundle, so if the bundle is scanned and the class does not resolve, the declaration is
+        broken (typo, renamed/deleted class, wrong package).
+    -->
+    <constraint id="eclipse:UnresolvedPropertyTesterClass">
+        <requiresConcept refId="eclipse:PropertyTesterImplementedBy"/>
+        <description>A property tester declares a `class` that does not resolve to any :Type in the graph. The implementation class is shipped by the declaring bundle, so a missing class means the declaration is broken and the tester will fail to load at runtime.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_PROPERTY_TESTER]->(pt:Eclipse:PropertyTester)
+            WHERE pt.testerClass IS NOT NULL
+              AND NOT (pt)-[:IMPLEMENTED_BY]->(:Type)
+              AND bundle:Osgi:Analyzed
+            RETURN bundle.bundleSymbolicName AS Bundle,
+                   pt.testerClass AS MissingTesterClass,
+                   pt.testerType AS ReceiverType,
+                   pt.namespace AS Namespace
+            ORDER BY Bundle, MissingTesterClass
+        ]]></cypher>
+    </constraint>
+
+    <!--
+        Lower-confidence integrity check: the receiver `type` frequently lives in another bundle
+        (or the JDK / framework) that may not be part of the scan, so an unresolved type is only a
+        real defect when the full type closure is scanned. Kept at minor severity for that reason.
+    -->
+    <constraint id="eclipse:UnresolvedPropertyTesterType" severity="minor">
+        <requiresConcept refId="eclipse:PropertyTesterTestsType"/>
+        <description>A property tester declares a receiver `type` that does not resolve to any :Type in the graph. This is only a genuine defect when the receiver type's bundle is part of the scan; otherwise it merely indicates an out-of-scope type.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_PROPERTY_TESTER]->(pt:Eclipse:PropertyTester)
+            WHERE pt.testerType IS NOT NULL
+              AND NOT (pt)-[:TESTS_TYPE]->(:Type)
+              AND bundle:Osgi:Analyzed
+            RETURN bundle.bundleSymbolicName AS Bundle,
+                   pt.testerType AS UnresolvedReceiverType,
+                   pt.testerClass AS TesterClass
+            ORDER BY Bundle, UnresolvedReceiverType
+        ]]></cypher>
+    </constraint>
+
+    <!-- Label <test property="ns.name"> references inside enablement / visibleWhen expressions -->
+    <concept id="eclipse:PropertyReference">
+        <requiresConcept refId="eclipse:Extension"/>
+        <description>Labels &lt;test&gt; elements (as used in enablement, visibleWhen, activeWhen and reusable expression definitions) that carry a `property` attribute as :Eclipse:PropertyReference, and stores the referenced fully qualified property (namespace + "." + name) in the property attribute. This is the consumer side of property testers.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..12]->(test:Xml:Element {name: 'test'})
+                  -[:HAS_ATTRIBUTE]->(propAttr:Xml:Attribute {name: 'property'})
+            WHERE propAttr.value IS NOT NULL AND propAttr.value CONTAINS '.'
+            SET test:Eclipse:PropertyReference, test.property = propAttr.value
+            RETURN DISTINCT test.property AS Property
+            ORDER BY Property
+        ]]></cypher>
+    </concept>
+
+    <!-- Resolve a property reference to a declared property tester (namespace + property name) -->
+    <concept id="eclipse:PropertyReferenceResolution">
+        <requiresConcept refId="eclipse:PropertyReference"/>
+        <requiresConcept refId="eclipse:PropertyTester"/>
+        <description>Creates SATISFIED_BY relationships from an :Eclipse:PropertyReference to any :Eclipse:PropertyTester that declares the referenced property, i.e. a tester whose namespace and one of its comma-separated properties concatenate to the reference's fully qualified property. Property testers are matched globally (the expression framework resolves properties across all contributors).</description>
+        <cypher><![CDATA[
+            MATCH (ref:Eclipse:PropertyReference)
+            MATCH (pt:Eclipse:PropertyTester)
+            WHERE pt.namespace IS NOT NULL AND pt.properties IS NOT NULL
+              AND any(p IN split(pt.properties, ',')
+                      WHERE trim(p) <> '' AND pt.namespace + '.' + trim(p) = ref.property)
+            MERGE (ref)-[:SATISFIED_BY]->(pt)
+            RETURN DISTINCT ref.property AS Property, pt.namespace AS Namespace
+            ORDER BY Property
+        ]]></cypher>
+    </concept>
+
+    <!--
+        A property reference whose namespace IS owned by a declared property tester, but whose
+        specific property is not declared by any tester in that namespace. Restricting to
+        known (declared) namespaces keeps this low-noise: references into framework namespaces
+        that are not part of the scan are ignored, while a typo or a stale property name within a
+        namespace the project owns is surfaced. Reported at minor severity.
+    -->
+    <constraint id="eclipse:UnsatisfiedPropertyReference" severity="minor">
+        <requiresConcept refId="eclipse:PropertyReferenceResolution"/>
+        <description>Finds &lt;test property="..."&gt; references whose namespace is owned by a declared property tester but whose property is not provided by any tester in that namespace. This typically indicates a typo in the property name or a property that was removed from the tester, silently breaking the enablement expression.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..12]->(ref:Eclipse:PropertyReference)
+            WHERE NOT (ref)-[:SATISFIED_BY]->(:Eclipse:PropertyTester)
+              AND bundle:Osgi:Analyzed
+              AND EXISTS {
+                    MATCH (pt:Eclipse:PropertyTester)
+                    WHERE pt.namespace IS NOT NULL AND ref.property STARTS WITH pt.namespace + '.'
+                  }
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle,
+                   ext.point AS Point,
+                   ref.property AS UnsatisfiedProperty
+            ORDER BY Bundle, UnsatisfiedProperty
+        ]]></cypher>
+    </constraint>
+
+    <!--
+        Architectural smell: a property tester declared in a HOST's plugin.xml whose
+        implementation `class` is not shipped by the host itself but only by one of its
+        fragments. It resolves at runtime (the fragment shares the host classloader), and it can
+        be a deliberate DRY choice, but it inverts the normal dependency direction: the host now
+        implicitly depends on a fragment being installed/attached to satisfy its own declaration.
+        If that fragment is absent, the host's tester fails to load. Reported as a warning so the
+        team can make the dependency explicit or move the class into the host.
+    -->
+    <constraint id="eclipse:PropertyTesterClassProvidedByFragment" severity="minor">
+        <requiresConcept refId="eclipse:PropertyTester"/>
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>A property tester declared in a host bundle's plugin.xml has an implementation `class` that is provided only by one of the host's fragments, not by the host itself. The declaration is resolvable only when that fragment is attached, creating an implicit host-to-fragment dependency that reverses the normal fragment-to-host direction.</description>
+        <cypher><![CDATA[
+            MATCH (host:Osgi:Bundle)-[:DECLARES_PROPERTY_TESTER]->(pt:Eclipse:PropertyTester)
+            WHERE NOT (host)-[:FRAGMENT_OF]->(:Osgi:Bundle)
+              AND pt.testerClass IS NOT NULL
+              AND host:Osgi:Analyzed
+              AND NOT (host)-[:CONTAINS]->(:Type {fqn: pt.testerClass})
+            MATCH (host)<-[:FRAGMENT_OF]-(frag:Osgi:Bundle)-[:CONTAINS]->(:Type {fqn: pt.testerClass})
+            RETURN host.bundleSymbolicName AS Host,
+                   pt.testerClass AS TesterClass,
+                   pt.testerType AS ReceiverType,
+                   collect(DISTINCT frag.bundleSymbolicName) AS ResolvedOnlyViaFragments
+            ORDER BY Host, TesterClass
+        ]]></cypher>
+    </constraint>
+
+    <!--
+        Coverage check ("types without property tester mapping"). This is inheritance-aware on
+        purpose: Eclipse's expression framework resolves a property tester by walking up the
+        receiver's supertypes and interfaces, so a tester on an abstract base or interface covers
+        all of its subtypes. A concrete view-model type is therefore considered covered when it,
+        OR any ancestor, is the receiver type of a property tester. Abstract types are excluded
+        from the denominator: they are never a runtime receiver on their own (a subtype instance
+        is), so requiring a tester on the abstract type itself would be meaningless, yet the
+        abstract type remains a valid place to ATTACH the shared tester (the *0.. ancestry walk
+        covers that case).
+    -->
+    <constraint id="eclipse:ViewModelWithoutPropertyTester" severity="minor">
+        <requiresConcept refId="eclipse:ViewModelType"/>
+        <requiresConcept refId="eclipse:PropertyTesterTestsType"/>
+        <description>A concrete :Eclipse:ViewModelType has no property tester registered for it or any of its supertypes/interfaces. Such a type cannot be used with custom property-based enablement expressions. This is a project-convention check driven by the `viewModelPattern` parameter of eclipse:ViewModelType.</description>
+        <cypher><![CDATA[
+            MATCH (vm:Eclipse:ViewModelType)
+            WHERE coalesce(vm.abstract, false) = false
+              AND EXISTS { MATCH (vm)<-[:CONTAINS]-(vmb:Osgi:Bundle) WHERE vmb:Osgi:Analyzed }
+              AND NOT EXISTS {
+                    MATCH (vm)-[:EXTENDS|IMPLEMENTS*0..]->(ancestor:Type)
+                          <-[:TESTS_TYPE]-(:Eclipse:PropertyTester)
+                  }
+            RETURN vm.fqn AS UncoveredViewModelType
+            ORDER BY UncoveredViewModelType
+        ]]></cypher>
+    </constraint>
+
+</jqassistant-rules>

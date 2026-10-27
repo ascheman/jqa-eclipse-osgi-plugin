@@ -8,6 +8,7 @@
             dependencies.
         </description>
         <includeConcept refId="osgi:Bundle"/>
+        <includeConcept refId="osgi:AnalyzedBundle"/>
         <includeConcept refId="osgi:ManifestVersion"/>
         <includeConcept refId="osgi:BundleVersion"/>
         <includeConcept refId="osgi:BundleName"/>
@@ -44,6 +45,27 @@
         ]]></cypher>
     </concept>
 
+    <!--
+        Select the bundles that constraints should evaluate ("in scope") via a regular expression
+        over the bundleSymbolicName. Bundles that do NOT match remain fully in the graph (so they
+        still act as resolution targets for Require-Bundle / Import-Package / class references),
+        but the OSGi and Eclipse constraints do not report issues against them. The default
+        pattern ".*" selects every bundle, preserving the previous behaviour; override
+        `analyzedBundlePattern` with your own bundles, e.g. "com\\.customer\\..*", to leave
+        third-party / framework (org.eclipse.*, ...) bundles alone.
+    -->
+    <concept id="osgi:AnalyzedBundle">
+        <requiresConcept refId="osgi:Bundle"/>
+        <requiresParameter name="analyzedBundlePattern" type="String" defaultValue=".*"/>
+        <description>Labels the OSGi bundles selected for constraint evaluation as :Osgi:Analyzed, based on the `analyzedBundlePattern` regular expression matched against the bundleSymbolicName. The default (".*") selects every bundle; set it to your own bundles so that constraints only report issues you own, while third-party bundles remain in the graph as resolution targets.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)
+            WHERE bundle.bundleSymbolicName =~ $analyzedBundlePattern
+            SET bundle:Osgi:Analyzed
+            RETURN count(bundle) AS AnalyzedBundles
+        ]]></cypher>
+    </concept>
+
     <!-- Extract Manifest-Version -->
     <concept id="osgi:ManifestVersion">
         <requiresConcept refId="osgi:Bundle"/>
@@ -62,6 +84,7 @@
     <!-- Extract Bundle-Version -->
     <concept id="osgi:BundleVersion">
         <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:AnalyzedBundle"/>
         <description>Sets the bundleVersion property on OSGi bundles from the Bundle-Version manifest header.
         </description>
         <cypher><![CDATA[
@@ -162,6 +185,7 @@
     <!-- Identify fragment bundles -->
     <concept id="osgi:Fragment">
         <requiresConcept refId="osgi:Bundle"/>
+        <requiresConcept refId="osgi:AnalyzedBundle"/>
         <description>Labels bundles with a Fragment-Host header as :Osgi:Fragment and extracts the host bundle symbolic
             name.
         </description>

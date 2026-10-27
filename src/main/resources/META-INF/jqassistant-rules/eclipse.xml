@@ -80,11 +80,12 @@
     <!-- Parse <extension-point> elements from plugin.xml -->
     <concept id="eclipse:ExtensionPoint">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Labels XML elements named "extension-point" inside a bundle's plugin.xml as :Eclipse:ExtensionPoint and creates DEFINES_EXTENSION_POINT relationships from the bundle. Extracts id, name, and schema attributes onto the node.</description>
+        <description>Labels XML elements named "extension-point" inside a bundle's plugin.xml (or a fragment's fragment.xml) as :Eclipse:ExtensionPoint and creates DEFINES_EXTENSION_POINT relationships from the bundle. Extracts id, name, and schema attributes onto the node.</description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(doc:Xml:Document)
-            WHERE doc.fileName ENDS WITH '/plugin.xml'
-            MATCH (doc)-[:HAS_ROOT_ELEMENT]->(root:Xml:Element {name: 'plugin'})
+            WHERE doc.fileName ENDS WITH '/plugin.xml' OR doc.fileName ENDS WITH '/fragment.xml'
+            MATCH (doc)-[:HAS_ROOT_ELEMENT]->(root:Xml:Element)
+            WHERE root.name IN ['plugin', 'fragment']
             MATCH (root)-[:HAS_ELEMENT]->(ep:Xml:Element {name: 'extension-point'})
             OPTIONAL MATCH (ep)-[:HAS_ATTRIBUTE]->(idAttr:Xml:Attribute {name: 'id'})
             OPTIONAL MATCH (ep)-[:HAS_ATTRIBUTE]->(nameAttr:Xml:Attribute {name: 'name'})
@@ -105,11 +106,13 @@
     <!-- Parse <extension> elements from plugin.xml -->
     <concept id="eclipse:Extension">
         <requiresConcept refId="osgi:Bundle"/>
-        <description>Labels XML elements named "extension" inside a bundle's plugin.xml as :Eclipse:Extension and creates DECLARES_EXTENSION relationships from the bundle. Extracts point (referenced extension point id), id, and name attributes onto the node.</description>
+        <requiresConcept refId="osgi:AnalyzedBundle"/>
+        <description>Labels XML elements named "extension" inside a bundle's plugin.xml (or a fragment's fragment.xml) as :Eclipse:Extension and creates DECLARES_EXTENSION relationships from the bundle. Extensions declared in a fragment.xml are attributed to the fragment but contribute into the host's namespace. Extracts point (referenced extension point id), id, and name attributes onto the node.</description>
         <cypher><![CDATA[
             MATCH (bundle:Osgi:Bundle)-[:CONTAINS]->(doc:Xml:Document)
-            WHERE doc.fileName ENDS WITH '/plugin.xml'
-            MATCH (doc)-[:HAS_ROOT_ELEMENT]->(root:Xml:Element {name: 'plugin'})
+            WHERE doc.fileName ENDS WITH '/plugin.xml' OR doc.fileName ENDS WITH '/fragment.xml'
+            MATCH (doc)-[:HAS_ROOT_ELEMENT]->(root:Xml:Element)
+            WHERE root.name IN ['plugin', 'fragment']
             MATCH (root)-[:HAS_ELEMENT]->(ext:Xml:Element {name: 'extension'})
             OPTIONAL MATCH (ext)-[:HAS_ATTRIBUTE]->(pointAttr:Xml:Attribute {name: 'point'})
             OPTIONAL MATCH (ext)-[:HAS_ATTRIBUTE]->(idAttr:Xml:Attribute {name: 'id'})
@@ -130,17 +133,143 @@
     <!-- Link extensions to implementing Java classes (via class attributes in extension children) -->
     <concept id="eclipse:ExtensionImplementation">
         <requiresConcept refId="eclipse:Extension"/>
-        <description>For each :Eclipse:Extension, scans descendant elements for a "class" attribute and creates IMPLEMENTED_BY relationships to the matching :Type node (when present in the graph). Common usage: extension contributions like &lt;view class="com.example.MyView"/&gt;.</description>
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>For each :Eclipse:Extension, scans descendant elements for a "class" attribute and creates IMPLEMENTED_BY relationships to the implementing :Type resolved within the declaring bundle's class space (its host plus attached fragments; the host copy is preferred). Types in unrelated bundles are intentionally NOT matched. Common usage: extension contributions like &lt;view class="com.example.MyView"/&gt;.</description>
         <cypher><![CDATA[
-            MATCH (ext:Eclipse:Extension)-[:HAS_ELEMENT*1..5]->(child:Xml:Element)
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..5]->(child:Xml:Element)
                   -[:HAS_ATTRIBUTE]->(classAttr:Xml:Attribute {name: 'class'})
-            WITH ext, classAttr.value AS className
+            WITH bundle, ext, classAttr.value AS className
             WHERE className IS NOT NULL AND className =~ '^[a-zA-Z_$][a-zA-Z0-9_$.]*$'
-            MATCH (type:Type) WHERE type.fqn = className
-            MERGE (ext)-[:IMPLEMENTED_BY]->(type)
-            RETURN DISTINCT ext.point AS Point, ext.extensionId AS ExtensionId, type.fqn AS Implementation
+            OPTIONAL MATCH (bundle)-[:FRAGMENT_OF]->(h:Osgi:Bundle)
+            WITH ext, className, coalesce(h, bundle) AS host
+            MATCH (member:Osgi:Bundle)-[:CONTAINS]->(type:Type {fqn: className})
+            WHERE member = host OR (member)-[:FRAGMENT_OF]->(host)
+            WITH ext, className, collect({t: type, inHost: member = host}) AS cands
+            WITH ext, coalesce([c IN cands WHERE c.inHost][0].t, cands[0].t) AS chosen
+            WHERE chosen IS NOT NULL
+            MERGE (ext)-[:IMPLEMENTED_BY]->(chosen)
+            RETURN DISTINCT ext.point AS Point, ext.extensionId AS ExtensionId, chosen.fqn AS Implementation
             ORDER BY Point, ExtensionId, Implementation
         ]]></cypher>
     </concept>
+
+    <!-- OSGi-level validation constraints for Eclipse extensions (class wiring) -->
+    <group id="eclipse:Constraints">
+        <description>Eclipse extension validation: broken (unresolvable) extension implementation classes, and host extensions whose implementation class is provided only by a fragment.</description>
+        <includeConstraint refId="eclipse:UnresolvedExtensionClass"/>
+        <includeConstraint refId="eclipse:ExtensionClassProvidedByFragment"/>
+    </group>
+
+    <!--
+        A class-bearing extension whose implementation class does not resolve within the
+        declaring bundle's class space. Extension classes are shipped by the contributing bundle,
+        so a class that cannot be resolved (when the bundle is scanned) is a broken contribution.
+        Property testers are excluded here because they have dedicated constraints. Values that
+        are not plain class names (executable-extension syntax with ':' or '/') are skipped.
+    -->
+    <constraint id="eclipse:UnresolvedExtensionClass">
+        <requiresConcept refId="eclipse:Extension"/>
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>An extension declares an implementation "class" that does not resolve to any :Type within the declaring bundle's class space (host plus attached fragments). The class is shipped by the contributing bundle, so a missing class means the contribution is broken and will fail to load at runtime.</description>
+        <cypher><![CDATA[
+            MATCH (bundle:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..5]->(:Xml:Element)
+                  -[:HAS_ATTRIBUTE]->(classAttr:Xml:Attribute {name: 'class'})
+            WITH bundle, ext, classAttr.value AS className
+            WHERE className IS NOT NULL
+              AND className =~ '^[a-zA-Z_$][a-zA-Z0-9_$.]*$'
+              AND coalesce(ext.point, '') <> 'org.eclipse.core.expressions.propertyTesters'
+              AND bundle:Osgi:Analyzed
+            OPTIONAL MATCH (bundle)-[:FRAGMENT_OF]->(h:Osgi:Bundle)
+            WITH bundle, ext, className, coalesce(h, bundle) AS host
+            WHERE NOT EXISTS {
+                    MATCH (member:Osgi:Bundle)-[:CONTAINS]->(:Type {fqn: className})
+                    WHERE member = host OR (member)-[:FRAGMENT_OF]->(host)
+                  }
+            RETURN DISTINCT bundle.bundleSymbolicName AS Bundle,
+                   ext.point AS Point,
+                   className AS UnresolvedClass
+            ORDER BY Bundle, Point, UnresolvedClass
+        ]]></cypher>
+    </constraint>
+
+    <!--
+        A host bundle's plugin.xml contributes an extension whose implementation class is provided
+        only by one of its fragments, not by the host itself. It resolves at runtime via the
+        shared classloader but inverts the normal dependency direction: the host now implicitly
+        depends on a fragment being attached to satisfy its own declaration. Reported as a
+        warning. Property testers have a dedicated equivalent and are excluded here.
+    -->
+    <constraint id="eclipse:ExtensionClassProvidedByFragment" severity="minor">
+        <requiresConcept refId="eclipse:Extension"/>
+        <requiresConcept refId="osgi:FragmentResolvesToHost"/>
+        <description>An extension declared in a host bundle's plugin.xml has an implementation "class" that is provided only by one of the host's fragments, not by the host itself. The contribution is resolvable only when that fragment is attached, creating an implicit host-to-fragment dependency that reverses the normal fragment-to-host direction.</description>
+        <cypher><![CDATA[
+            MATCH (host:Osgi:Bundle)-[:DECLARES_EXTENSION]->(ext:Eclipse:Extension)
+                  -[:HAS_ELEMENT*1..5]->(:Xml:Element)
+                  -[:HAS_ATTRIBUTE]->(classAttr:Xml:Attribute {name: 'class'})
+            WHERE NOT (host)-[:FRAGMENT_OF]->(:Osgi:Bundle)
+            WITH host, ext, classAttr.value AS className
+            WHERE className IS NOT NULL
+              AND className =~ '^[a-zA-Z_$][a-zA-Z0-9_$.]*$'
+              AND coalesce(ext.point, '') <> 'org.eclipse.core.expressions.propertyTesters'
+              AND host:Osgi:Analyzed
+              AND NOT (host)-[:CONTAINS]->(:Type {fqn: className})
+            MATCH (host)<-[:FRAGMENT_OF]-(frag:Osgi:Bundle)-[:CONTAINS]->(:Type {fqn: className})
+            RETURN DISTINCT host.bundleSymbolicName AS Host,
+                   ext.point AS Point,
+                   className AS Class,
+                   collect(DISTINCT frag.bundleSymbolicName) AS ResolvedOnlyViaFragments
+            ORDER BY Host, Class
+        ]]></cypher>
+    </constraint>
+
+    <!--
+        Opt-in group: fragment.xml descriptor handling. Kept separate from eclipse:Default
+        because fragment.xml is optional (see the constraint below).
+    -->
+    <group id="eclipse:FragmentDescriptors">
+        <description>Opt-in: models fragment.xml descriptors and, as a project convention, flags fragments that have none. Not part of eclipse:Default because fragment.xml is optional.</description>
+        <includeConcept refId="eclipse:FragmentDescriptor"/>
+        <includeConstraint refId="eclipse:FragmentWithoutDescriptor"/>
+    </group>
+
+    <!-- Link a fragment to its fragment.xml declarative descriptor -->
+    <concept id="eclipse:FragmentDescriptor">
+        <requiresConcept refId="osgi:Fragment"/>
+        <description>For each :Osgi:Fragment that contains a fragment.xml, creates a HAS_FRAGMENT_DESCRIPTOR relationship to the :Xml:Document and sets hasFragmentDescriptor=true. fragment.xml is the fragment's equivalent of plugin.xml: it contributes extensions and extension-points into the host's namespace via the shared classloader. Requires fragment.xml to be present in the graph (JAR-form scan, or file-scope scan of the fragment.xml files).</description>
+        <cypher><![CDATA[
+            MATCH (fragment:Osgi:Fragment)-[:CONTAINS]->(doc:Xml:Document)
+            WHERE doc.fileName ENDS WITH '/fragment.xml'
+            MERGE (fragment)-[:HAS_FRAGMENT_DESCRIPTOR]->(doc)
+            SET fragment.hasFragmentDescriptor = true
+            RETURN fragment.bundleSymbolicName AS Fragment, doc.fileName AS Descriptor
+            ORDER BY Fragment
+        ]]></cypher>
+    </concept>
+
+    <!--
+        OPT-IN convention check (not part of eclipse:Default). fragment.xml is optional: many
+        fragments legitimately ship only classes or resources (native libraries, localization /
+        NL fragments, additional classpath) and declare no extensions, so they carry no
+        fragment.xml. Enable this only for projects whose convention is that every fragment
+        contributes declaratively.
+    -->
+    <constraint id="eclipse:FragmentWithoutDescriptor" severity="minor">
+        <requiresConcept refId="osgi:Fragment"/>
+        <description>Finds :Osgi:Fragment bundles that do not contain a fragment.xml. This is a project-convention check only: fragments that contribute solely classes or resources (native code, localization, additional classpath) do not need a fragment.xml, which is why this constraint is intentionally excluded from the default group.</description>
+        <cypher><![CDATA[
+            MATCH (fragment:Osgi:Fragment)
+            WHERE NOT EXISTS {
+                    MATCH (fragment)-[:CONTAINS]->(doc:Xml:Document)
+                    WHERE doc.fileName ENDS WITH '/fragment.xml'
+                  }
+              AND fragment:Osgi:Analyzed
+            RETURN fragment.bundleSymbolicName AS Fragment,
+                   fragment.fragmentHostSymbolicName AS Host
+            ORDER BY Fragment
+        ]]></cypher>
+    </constraint>
 
 </jqassistant-rules>

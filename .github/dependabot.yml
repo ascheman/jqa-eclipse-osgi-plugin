@@ -5,6 +5,20 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    ignore:
+      # Managed by the jQAssistant BOM (com.buschmais.jqassistant:bom), imported
+      # in dependencyManagement. Bumping these individually fights the BOM:
+      # dependabot proposed junit-jupiter 6.0.3 against a BOM pinning 5.14.2,
+      # which broke the build and then needed a follow-up commit to remove the
+      # override. Bump jqa.version instead and let the BOM carry the rest.
+      - dependency-name: "org.junit.jupiter:*"
+      - dependency-name: "org.junit.platform:*"
+      - dependency-name: "org.junit.vintage:*"
+      - dependency-name: "org.junit-pioneer:*"
+      - dependency-name: "junit:junit"
+      - dependency-name: "org.assertj:*"
+      - dependency-name: "org.mockito:*"
+      - dependency-name: "org.slf4j:*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

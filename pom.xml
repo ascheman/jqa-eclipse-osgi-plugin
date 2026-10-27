@@ -46,13 +46,11 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
 
-        <oss.sonatype.org.url>https://oss.sonatype.org</oss.sonatype.org.url>
-
         <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
 
         <assertj-core.version>3.27.7</assertj-core.version>
         <jqa.version>2.9.1</jqa.version>
-        <jqa-template-report-plugin.version>0.1.0-SNAPSHOT</jqa-template-report-plugin.version>
+        <jqa-template-report-plugin.version>0.1.0</jqa-template-report-plugin.version>
         <junit-jupiter.version>5.14.3</junit-jupiter.version>
         <maven-dependency-plugin.version>3.10.0</maven-dependency-plugin.version>
         <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
@@ -60,43 +58,46 @@
         <maven-versions-plugin.version>2.21.0</maven-versions-plugin.version>
         <slf4j.version>2.0.17</slf4j.version>
         <slf4j-simple.version>2.0.17</slf4j-simple.version>
+        <jreleaser-maven-plugin.version>1.26.0</jreleaser-maven-plugin.version>
+        <maven-gpg-plugin.version>3.2.8</maven-gpg-plugin.version>
+        <maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version>
+        <maven-source-plugin.version>3.4.0</maven-source-plugin.version>
+
+        <!--
+          Signing subkey of gerd@aschemann.net. The trailing "!" pins gpg to exactly
+          this RSA-4096 subkey: the primary key of that uid is a 1024 bit DSA key from
+          2005 and must never end up on a published signature. Override on the command
+          line with -Dgpg.keyname=... when releasing from a different keyring.
+        -->
+        <gpg.keyname>D6D79905C2FDD3E4FA6C13A9F3182FD01BA43E49!</gpg.keyname>
+
     </properties>
 
-    <pluginRepositories>
-        <pluginRepository>
-            <id>ossrh</id>
-            <url>${oss.sonatype.org.url}/content/repositories/snapshots/</url>
-            <snapshots>
-                <enabled>true</enabled>
-                <updatePolicy>always</updatePolicy>
-            </snapshots>
-        </pluginRepository>
-    </pluginRepositories>
 
-    <repositories>
-        <repository>
-            <id>ossrh</id>
-            <url>${oss.sonatype.org.url}/content/repositories/snapshots/</url>
-            <snapshots>
-                <enabled>true</enabled>
-                <updatePolicy>always</updatePolicy>
-            </snapshots>
-        </repository>
-    </repositories>
 
-    <distributionManagement>
-        <repository>
-            <id>oss.sonatype.org</id>
-            <url>${oss.sonatype.org.url}/service/local/staging/deploy/maven2/</url>
-        </repository>
-        <snapshotRepository>
-            <id>ossrh</id>
-            <url>${oss.sonatype.org.url}/content/repositories/snapshots/</url>
-            <layout>default</layout>
-        </snapshotRepository>
-    </distributionManagement>
 
     <build>
+        <!--
+          jqassistant-plugin.xml carries version="${project.version}", which jQAssistant
+          logs as the plugin version - unfiltered it shows the literal placeholder.
+          Filtering is scoped to that one file on purpose: rule files and FreeMarker
+          templates use ${...} for their own purposes and must pass through untouched.
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <includes>
+                    <include>META-INF/jqassistant-plugin.xml</include>
+                </includes>
+                <filtering>true</filtering>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <excludes>
+                    <exclude>META-INF/jqassistant-plugin.xml</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <artifactId>maven-dependency-plugin</artifactId>
@@ -120,6 +121,15 @@
                                   relationship even though the dep is genuinely needed.
                                 -->
                                 <ignoredUnusedDeclaredDependency>net.aschemann.jqassistant.plugins:jqa-template-report-plugin</ignoredUnusedDeclaredDependency>
+                                <!--
+                                  Integration-test runtime dependencies: the JUnit engine and the
+                                  jQAssistant xml / common plugins are discovered from the classpath
+                                  at run time (scanners and the test engine), so no test class
+                                  references their types directly.
+                                -->
+                                <ignoredUnusedDeclaredDependency>org.junit.jupiter:junit-jupiter-engine</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>com.buschmais.jqassistant.plugin:xml</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>com.buschmais.jqassistant.plugin:common</ignoredUnusedDeclaredDependency>
                             </ignoredUnusedDeclaredDependencies>
                         </configuration>
                     </execution>
@@ -251,45 +261,173 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
             <version>${assertj-core.version}</version>
             <scope>test</scope>
         </dependency>
+        <!--
+            jQAssistant integration-test support: AbstractPluginIT sets up an in-memory store and
+            plugin registry from the test classpath. The java and xml plugins provide the scanners
+            that build the base graph (JAR/MANIFEST -> :Jar:Archive/:Manifest, plugin.xml/fragment.xml
+            -> :Xml:Document) that this plugin's Cypher rules enrich.
+        -->
+        <dependency>
+            <groupId>com.buschmais.jqassistant.core</groupId>
+            <artifactId>test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.buschmais.jqassistant.core</groupId>
+            <artifactId>scanner</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.buschmais.jqassistant.plugin</groupId>
+            <artifactId>java</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.buschmais.jqassistant.plugin</groupId>
+            <artifactId>xml</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.buschmais.jqassistant.plugin</groupId>
+            <artifactId>common</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <!--
+      This plugin's own SNAPSHOTs go to the same place, for the same reason.
+      Deploying needs the Central Portal user token in a <server> with this id,
+      and SNAPSHOT publishing enabled for the namespace in the Portal (without
+      that the upload is rejected with 403, not 401).
+    -->
+    <distributionManagement>
+        <snapshotRepository>
+            <id>central-snapshots</id>
+            <name>Central Portal Snapshots</name>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+    </distributionManagement>
 
     <profiles>
         <profile>
-            <id>github</id>
-            <activation>
-                <property>
-                    <name>env.GITHUB_TOKEN</name>
-                </property>
-            </activation>
-            <repositories>
+            <!--
+              Release from a local working copy, so that signing uses the local GnuPG
+              agent and the private key never leaves this machine:
+
+                  ./mvnw -Prelease clean deploy
+                  ./mvnw -Prelease jreleaser:full-release
+
+              The first command builds, signs and stages everything into
+              ${staging.repository.directory}; the second uploads that staging
+              repository to Maven Central and creates the GitHub release.
+
+              Credentials come from the environment, never from the repository:
+              JRELEASER_GITHUB_TOKEN plus JRELEASER_MAVENCENTRAL_USERNAME and
+              JRELEASER_MAVENCENTRAL_PASSWORD (the Central Portal user token, not
+              the account password). JReleaser itself is configured in jreleaser.yml.
+            -->
+            <id>release</id>
+            <properties>
+                <staging.repository.directory>${project.build.directory}/staging-deploy</staging.repository.directory>
+            </properties>
+            <distributionManagement>
                 <!--
-                  jqa-template-report-plugin SNAPSHOTs are published here. Drop
-                  the dependency entirely once the plugin reaches a public
-                  release repository (Maven Central). Auth is via the same
-                  GITHUB_TOKEN that activates this profile, supplied through
-                  ~/.m2/settings.xml or actions/setup-java's server-id wiring.
+                  Deploy to a local directory rather than to a remote repository.
+                  JReleaser picks the artifacts up from here, which keeps the upload
+                  a separate, repeatable step: a failed upload does not require a rebuild.
                 -->
                 <repository>
-                    <id>github-jqa-template-report</id>
-                    <name>GitHub Packages: ascheman/jqa-template-report-plugin</name>
-                    <url>https://maven.pkg.github.com/ascheman/jqa-template-report-plugin</url>
-                    <releases><enabled>true</enabled></releases>
-                    <snapshots><enabled>true</enabled></snapshots>
+                    <id>staging</id>
+                    <url>file://${staging.repository.directory}</url>
                 </repository>
-            </repositories>
-            <distributionManagement>
+                <!--
+                  Also the snapshot element: a profile's distributionManagement
+                  is merged with the one outside it element by element, so
+                  without this a -Prelease deploy on a still-SNAPSHOT version
+                  would fall through to the snapshot repository and leave the
+                  staging directory empty.
+                -->
                 <snapshotRepository>
-                    <id>github</id>
-                    <name>GitHub Packages</name>
-                    <!--suppress UnresolvedMavenProperty -->
-                    <url>https://maven.pkg.github.com/${env.GITHUB_LOGIN}/${project.artifactId}</url>
+                    <id>staging</id>
+                    <url>file://${staging.repository.directory}</url>
                 </snapshotRepository>
             </distributionManagement>
+            <build>
+                <plugins>
+                    <plugin>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>${maven-source-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${maven-javadoc-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                                <configuration>
+                                    <keyname>${gpg.keyname}</keyname>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.jreleaser</groupId>
+                        <artifactId>jreleaser-maven-plugin</artifactId>
+                        <version>${jreleaser-maven-plugin.version}</version>
+                        <configuration>
+                            <!--
+                              Required. The Maven plugin does NOT pick up
+                              jreleaser.yml by itself: without configFile it
+                              builds its model from this POM instead
+                              (AbstractJReleaserMojo: `null == configFile ?
+                              convertModel() : readModel(logger)`), silently
+                              ignoring the file. The symptom is not an error
+                              but "[maven] Deploying is not enabled. Skipping",
+                              because the whole deploy section is then absent
+                              from the model. Check the log for
+                              "Configuring with .../jreleaser.yml".
+                            -->
+                            <configFile>${project.basedir}/jreleaser.yml</configFile>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
+
     </profiles>
 </project>

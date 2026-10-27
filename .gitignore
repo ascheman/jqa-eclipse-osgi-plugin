@@ -19,3 +19,11 @@ CLAUDE.local.md
 
 # jQA local
 /jqassistant/store
+
+# Runtime artefact: interaction trace written by the graph viewer's debug panel.
+osgi-graph-trace.json
+
+# Generated output. Note that the working documents it is generated from are
+# deliberately NOT ignored: they stay visible in `git status` so they are not
+# forgotten, and are simply never added.
+*.pdf
